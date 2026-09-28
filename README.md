@@ -26,6 +26,25 @@ Open http://localhost:5173 and run the flow: **Recommend → approve → Create 
 
 Or from the repo root: `npm run dev` starts both servers at once.
 
+## Deploy (one URL for app + API)
+
+The Express server also serves the built frontend from `frontend/dist`, so a single service hosts everything:
+
+```bash
+npm run install:all && npm run build && npm start   # http://localhost:4000
+```
+
+### Render (free)
+
+1. Push this repo to GitHub.
+2. In [Render](https://render.com) → **New → Blueprint**, pick the repo (`render.yaml` included), or create a Web Service with:
+   - Build: `npm run install:all && npm run build`
+   - Start: `npm start`
+3. Add env vars: `HINDSIGHT_BASE_URL`, `HINDSIGHT_API_KEY`, `GROQ_API_KEY` (values from your `backend/.env`).
+4. After the first deploy, seed memory once: `curl -X POST https://your-app.onrender.com/api/import`.
+
+Note: the free tier sleeps after ~15 min idle (first visit wakes it in ~50s). A/B test records are ephemeral on free hosting — by design the *durable* memory lives in Hindsight Cloud, so recommendations and learned hooks survive redeploys.
+
 ## Configuration (backend/.env)
 
 Everything is optional — the app degrades gracefully so the demo always runs:

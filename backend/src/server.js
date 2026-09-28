@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readCsv, toInt } from './csv.js';
@@ -303,6 +304,14 @@ app.get('/api/memory', async (_req, res) => {
     res.status(500).json({ error: String(err.message || err) });
   }
 });
+
+// Serve the built React app when present (production / hosted demo).
+// Registered after all API routes so /api/* always wins.
+const distDir = path.resolve(__dirname, '../../frontend/dist');
+if (fs.existsSync(distDir)) {
+  app.use(express.static(distDir));
+  app.get(/^\/(?!api).*/, (_req, res) => res.sendFile(path.join(distDir, 'index.html')));
+}
 
 app.listen(PORT, () => {
   console.log(`Engagement agent backend on http://localhost:${PORT}`);

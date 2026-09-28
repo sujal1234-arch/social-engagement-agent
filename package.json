@@ -2,9 +2,15 @@
   "name": "social-engagement-agent",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "setup": "npm --prefix backend install && npm --prefix frontend install",
+    "install:all": "npm --prefix backend install && npm --prefix frontend install",
+    "build": "npm --prefix frontend install && npm --prefix frontend run build",
+    "start": "node backend/src/server.js",
     "dev": "node scripts/dev.js",
-    "import": "curl -s -X POST http://localhost:4000/api/import"
+    "verify": "node backend/src/verify.js",
+    "import": "node -e \"fetch('http://localhost:'+(process.env.PORT||4000)+'/api/import',{method:'POST'}).then(r=>r.json()).then(console.log)\""
   }
 }
