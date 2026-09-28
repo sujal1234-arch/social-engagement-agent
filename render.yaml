@@ -6,8 +6,11 @@ services:
     name: social-engagement-agent
     runtime: node
     plan: free
+    # --include=dev matters: NODE_ENV=production makes npm skip devDependencies,
+    # and vite lives in frontend devDependencies (needed to build the UI).
     buildCommand: npm run install:all && npm run build
     startCommand: npm start
+    autoDeploy: true
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
