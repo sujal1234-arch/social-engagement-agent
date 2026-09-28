@@ -1,0 +1,179 @@
+Social Media Engagement Agent — Build Plan (Hindsight memory)
+
+Overview
+A Social Media Engagement Agent that uses Hindsight as its persistent memory layer to learn which posts, hooks, and reply styles work for your audience. The agent recommends hooks, captions, hashtags, and posting times; suggests reply templates; runs A/B tests; and writes winning tactics back into memory so recommendations improve over time. The demo story shows a clear before → after within 60 seconds.
+
+Target Users and Core Workflows
+Primary users: Social Media Manager, Content Marketer, Community Manager, Growth Marketer.
+Core workflows:
+- Content ideation: generate memory-informed hooks and captions.
+- Scheduling and A/B testing: create two variants, schedule, compare CTR/engagement.
+- Comment handling: auto-suggest replies and tag recurring issues.
+- Learning loop: persist winning hooks and tags to Hindsight for future recall.
+
+High-level architecture (components and flow)
+- Frontend (React SPA) — composer, A/B scheduler, dashboard, comment reply modal.
+- Backend (Node/Express or FastAPI) — orchestrates Hindsight reads/writes, LLM calls, AB logic, and scheduling.
+- Memory layer (Hindsight) — persistent vector + structured memory for posts, comments, tags, winning hooks, and provenance.
+- Model services:
+  - Embeddings provider (OpenAI/Groq/Qwen) — create vectors for posts/comments to store in Hindsight.
+  - LLM for generation (hosted model) — produce hooks, captions, reply templates, and short explanations.
+- Storage:
+  - Postgres for structured records (users, AB tests, schedules, metrics).
+  - Vector index — Hindsight handles vector search; Postgres stores metadata.
+- Optional integrations — LinkedIn/Twitter APIs for real posting; otherwise mock scheduler for demo.
+- Devops — single VM or managed services (Vercel/Render) for hackathon.
+
+Tech stack and why each is used
+Frontend: React — fast to build interactive SPA; easy to show composer, scheduler, and dashboard.
+Backend: Node.js + Express or Python FastAPI — lightweight APIs to call Hindsight, LLMs, and manage AB tests.
+Memory: Hindsight Cloud or OSS — required for hackathon; stores semantic vectors and structured facts; enables recall and learning.
+Embeddings: OpenAI / Groq / Qwen — convert posts/comments into vectors for semantic search in Hindsight.
+LLM: OpenAI / Groq / Qwen — generate hooks, captions, reply templates, and one-line provenance.
+Vector DB: Hindsight (primary) + optional Pinecone for fallback — Hindsight is the judge-required memory layer.
+Relational DB: Postgres — store AB test metadata, scheduled posts, user approvals, and audit logs.
+Scheduler: Mock scheduler for demo; optional LinkedIn/Twitter API integration for live posting.
+Auth / Security: SSO / OAuth (demo: simple token) — protect access to memory and posting endpoints.
+Hosting: Vercel / Render / Heroku — quick deployment for frontend/backend; minimal ops for hackathon.
+
+Concrete build plan (24-hour urgent + 4-week polished path)
+24-hour urgent (demo tomorrow)
+1. 0–1h Discovery & setup
+   - Create Hindsight Cloud instance (use MEMHACK99 if needed).
+   - Prepare 50–200 sample posts + 50 comments (CSV).
+2. 1–4h Backend minimal
+   - Implement endpoints: /import, /recommend, /create-ab, /schedule, /ab-results, /reply-suggest.
+   - Ingest CSV into Hindsight as memory entries (post text + metrics + tags).
+3. 4–8h Core logic
+   - Use Hindsight vector search to fetch top similar high-CTR posts.
+   - Call LLM with a short prompt to generate hook/caption/hashtags and a one-line "why" (provenance).
+   - Implement simple AB simulator: memory-matched hook → 3× clicks.
+4. 8–11h Frontend
+   - Single page: Recommend button, edit fields, Create AB test, Schedule two variants, Dashboard to fetch /ab-results.
+   - Comment modal calling /reply-suggest.
+5. 11–12h Polish & demo
+   - Add provenance text, human approval button, and save winning hook back to Hindsight.
+   - Prepare 60-second demo script and README.
+
+4-week polished MVP
+- Week 1: Data, Hindsight schema, seed memory, label top posts.
+- Week 2: Embeddings pipeline, robust recall queries, LLM prompt tuning, memory writeback logic.
+- Week 3: Full UI, real scheduler integration (optional), human-in-loop approval, reply moderation queue.
+- Week 4: A/B automation, analytics dashboard, RBAC, logging, demo video, GitHub repo and submission materials.
+
+Key implementation details (how to use each tech)
+- Hindsight ingestion: store each post as a memory entry with fields: text, timestamp, platform, impressions, clicks, tags, case_study_id. Use comment entries linked by post_id.
+- Recall flow: on /recommend, query Hindsight for nearest high-CTR posts and recurring complaint tags; return top N examples to LLM as context.
+- LLM prompt design: include 3–5 top posts (short excerpts), audience tone, and ask for: hook, 2-sentence caption, 3 hashtags, best posting time, and one-line provenance explanation.
+- A/B logic: create AB test record in Postgres; schedule two variants; simulate or collect metrics; compute CTR and pick winner.
+- Learning loop: after AB completes, write the winning hook into Hindsight as top_hook with metadata (ab_id, metrics, timestamp, why). This makes memory visible and demonstrable.
+- Provenance: always show which memory entry influenced the recommendation (e.g., "Suggested because: matched post #3 — 6% CTR, demo video").
+- Human-in-the-loop: require a one-click approval before publishing; store approvals in DB.
+
+Core APIs (suggested)
+- POST /import — seed Hindsight with CSV.
+- GET /recommend?channel=linkedin — returns hook, caption, hashtags, best_time, why.
+- POST /create-ab — create AB test and return id.
+- POST /schedule — schedule post (mock or real) with optional ab_id.
+- GET /ab-results/:id — returns metrics and winner; triggers memory update.
+- POST /reply-suggest — input: comment text → returns reply template and tag.
+
+Prompt templates (copy-ready)
+- Recommend prompt:
+  System: You are a concise B2B social media assistant.
+  User: Given these top posts: [paste 3 short post texts]. Suggest:
+  1) one-line hook
+  2) two-sentence caption
+  3) three hashtags
+  4) best posting time (weekday + hour)
+  Finish with one short sentence: why this matches past winners.
+- Reply prompt:
+  System: You are a helpful, consultative brand voice.
+  User: A comment asks: "[comment text]". Provide a short reply (<=2 sentences) linking to pricing and offering a 15-minute call.
+
+UI Wireframe (single page)
+- Left column: Post composer (hook, caption, hashtags, suggested image), A/B toggle.
+- Center: Scheduler (calendar + time suggestion), Schedule button (mock).
+- Right: Dashboard — A/B results, top hooks, recurring issues, influencer list.
+- Modal: Reply suggestions when clicking a comment.
+
+A/B Test Flow (demo)
+1. Use GET /recommend to generate Hook A (memory-informed) and Hook B (technical variant).
+2. Schedule both for the same time via POST /schedule with ab_id.
+3. After 48 hours (or simulated), call GET /ab-results/:id to show CTR/likes/comments.
+4. Dashboard highlights winner and auto-saves winning hook to memory.
+
+Demo Script (60 seconds)
+1. Problem (10s): show a generic post with low CTR.
+2. Agent action (20s): click Recommend → agent pulls Hindsight memory, returns hook + caption + time and schedule A/B.
+3. Result (20s): show A/B dashboard — memory-informed post wins (simulated 2–3× CTR).
+4. Close (10s): show reply template auto-applied to a comment and the memory entry updated for future suggestions.
+
+Minimal data schema (CSV)
+posts.csv:
+post_id,text,timestamp,platform,impressions,clicks,likes,comments,shares
+
+comments.csv:
+comment_id,post_id,user,text,timestamp
+
+Sample rows (for demo)
+posts.csv:
+1,"Acme cut integration time by 60% using our API","2026-08-03T10:00:00","linkedin",1200,72,150,30,10
+2,"New API release notes","2026-07-20T09:00:00","linkedin",400,4,40,5,2
+3,"90s demo: ERP connector in action","2026-08-10T10:00:00","linkedin",1500,90,200,45,15
+
+comments.csv:
+1,2,"dev_jane","Where is the pricing?","2026-07-20T09:10:00"
+2,1,"ops_raj","Does this support OAuth?","2026-08-03T10:05:00"
+
+Minimal code snippets (examples)
+Express recommend route (pseudo):
+app.get('/api/recommend', async (req, res) => {
+  const topPosts = await getTopPosts(); // from Hindsight + vector search
+  const prompt = buildRecommendPrompt(topPosts);
+  const llmResp = await callLLM(prompt);
+  res.json(parseLLMResponse(llmResp));
+});
+
+React fetch example (pseudo):
+async function fetchRecommend(){
+  const r = await fetch('/api/recommend?channel=linkedin');
+  const data = await r.json();
+  setRecommendation(data);
+}
+
+Success criteria for hackathon demo
+- Functional: Recommend hook + caption + time; schedule A/B; show simulated or real A/B results.
+- Persuasive: Demonstrate a clear CTR uplift (2–3×) in demo data or simulation.
+- Polished: Show memory update (winning hook saved) and a reply template used automatically.
+
+Risks & mitigations
+- Hallucination: keep LLM outputs short; show provenance and require human approval.
+- API limits: mock scheduling if rate limits block real posting.
+- Trust: include human approval step before publishing.
+
+Implementation checklist (week by week)
+Week 1 — Setup & Data:
+- Create repo, basic React + Express skeleton.
+- Prepare CSVs and load sample data.
+Week 2 — Embeddings & Memory:
+- Integrate embeddings API; build vector index in Hindsight.
+- Implement /api/recommend using nearest neighbors + LLM prompt.
+Week 3 — UI & Scheduler:
+- Build composer UI, show recommendations, implement mock scheduler.
+- Implement reply suggestion endpoint and comment UI.
+Week 4 — A/B, Metrics & Polish:
+- Implement A/B tracking (store impressions/clicks simulated or real).
+- Build dashboard and demo script; add provenance lines and human approval flow.
+
+Deliverables to hand to your team
+- Repo skeleton with frontend/ and backend/ folders.
+- CSV sample files (50 posts, 100 comments).
+- Prompt templates (recommendation, reply).
+- Demo script and slide with before/after screenshots.
+
+Quick commands (manual save)
+- Create a new text file named Social_Media_Engagement_Agent_Build_Plan.txt and paste the entire content above into it.
+- Save and include this file in your project repo root.
+
+End of file

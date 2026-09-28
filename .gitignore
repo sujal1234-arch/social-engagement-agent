@@ -1,0 +1,8 @@
+node_modules/
+dist/
+backend/.env
+backend/server.log
+data/ab-tests.json
+data/memory-fallback.json
+*.log
+.freebuff/

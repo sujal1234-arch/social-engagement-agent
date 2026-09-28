@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Social Engagement Agent — Demo Video</title>
+    <style>
+      body { background: #0d1117; color: #e6edf3; font-family: 'Segoe UI', system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; padding: 24px; margin: 0; }
+      h1 { font-size: 18px; margin: 0 0 4px; }
+      p { color: #8b949e; font-size: 13px; margin: 0 0 16px; }
+      video { max-width: 720px; width: 100%; border: 1px solid #2d333b; border-radius: 10px; background: #000; }
+      ul { color: #8b949e; font-size: 13px; max-width: 720px; }
+      li { margin: 4px 0; }
+      code { color: #2f81f7; }
+    </style>
+  </head>
+  <body>
+    <h1>Social Media Engagement Agent — 60-second demo</h1>
+    <p>Hindsight Cloud (memory) · Groq LLM · A/B simulator · human-in-the-loop</p>
+    <video controls autoplay muted>
+      <source src="demo-video.mp4" type="video/mp4" />
+      Your browser cannot play this video.
+    </video>
+    <ul>
+      <li><strong>0:00</strong> — Clean start: 100 memories, 0 winning hooks</li>
+      <li><strong>Recommend</strong> — LLM hook from Hindsight recall + provenance ("matched post #11 — 7% CTR")</li>
+      <li><strong>Approve → A/B</strong> — ab_mulj3p2i4l, both variants scheduled</li>
+      <li><strong>Results</strong> — A 6.04% vs B 2.01% CTR → 3× uplift</li>
+      <li><strong>Writeback</strong> — winning hook saved to Hindsight (0 → 1 winning hooks)</li>
+      <li><strong>Reply modal</strong> — pricing reply generated, approved & applied</li>
+    </ul>
+  </body>
+</html>
