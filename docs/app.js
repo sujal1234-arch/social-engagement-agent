@@ -51,6 +51,7 @@ async function runRecommend() {
       <div class="box ok">${data.hook}</div>
       <div class="box">${data.caption}</div>
       <div class="prov">via ${data.source || 'memory + llm'}\nProvenance:\n${ex}</div>`;
+    pingHealth();
   } catch (e) {
     out.innerHTML = `<div class="err">Failed: ${e.message}. The free tier may be waking - retry in a moment.</div>`;
   } finally {
@@ -83,6 +84,7 @@ async function runAb() {
       <div class="box">A: ${res.variants.A.hook}\n   CTR ${res.results.A.ctr}%</div>
       <div class="box">B: ${res.variants.B.hook}\n   CTR ${res.results.B.ctr}%</div>
       <div class="ok">Winner: ${win} · ${res.results.uplift}× uplift${res.memory_writeback ? ' · written back to Hindsight ✓' : ''}</div>`;
+    pingHealth();
   } catch (e) {
     out.innerHTML = `<div class="err">Failed: ${e.message}. Retry in a moment.</div>`;
   } finally {
@@ -101,6 +103,7 @@ async function runReply() {
     out.innerHTML = `
       <div class="box ok">${data.reply || data.suggested_reply || ''}</div>
       <div class="prov">tag: ${data.tag || '?'} · matched ${data.similar_count ?? 0} similar comments in memory</div>`;
+    pingHealth();
   } catch (e) {
     out.innerHTML = `<div class="err">Failed: ${e.message}. Retry in a moment.</div>`;
   } finally {
