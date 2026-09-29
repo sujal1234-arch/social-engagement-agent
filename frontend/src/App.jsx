@@ -24,6 +24,12 @@ export default function App() {
   const [modalTag, setModalTag] = useState('');
   const [modalLoading, setModalLoading] = useState(false);
   const [toast, setToast] = useState('');
+  const [user, setUser] = useState(null); // { id, email, name }
+  const [authModal, setAuthModal] = useState(null); // 'login' | 'register'
+  const [authForm, setAuthForm] = useState({ email: '', password: '', name: '' });
+  const [authBusy, setAuthBusy] = useState(false);
+  const [connections, setConnections] = useState([]);
+  const [platforms, setPlatforms] = useState([]);
   const [form, setForm] = useState({
     hook: '',
     hook_b: '',
@@ -36,6 +42,8 @@ export default function App() {
   const [approved, setApproved] = useState(false);
   const [scheduledA, setScheduledA] = useState(false);
   const [scheduledB, setScheduledB] = useState(false);
+
+  const BASE_URL = '';
 
   const showToast = useCallback((msg) => {
     setToast(msg);
@@ -53,7 +61,7 @@ export default function App() {
 
   const loadMemory = useCallback(async () => {
     try {
-      const r = await fetch('/api/memory');
+      const r = await fetch('/api/memory', { headers: authHeaders() });
       setMemory(await r.json());
     } catch {
       /* ignore */
@@ -74,12 +82,113 @@ export default function App() {
     loadHealth();
     loadMemory();
     loadComments();
+    loadPlatforms();
+    restoreSession();
   }, [loadHealth, loadMemory, loadComments]);
+
+  const authHeaders = useCallback(() => {
+    const t = localStorage.getItem('sea_token');
+    return t ? { Authorization: `Bearer ${t}` } : {};
+  }, []);
+
+  async function restoreSession() {
+    const t = localStorage.getItem('sea_token');
+    if (!t) return;
+    try {
+      const r = await fetch('/api/me', { headers: { Authorization: `Bearer ${t}` } });
+      if (r.ok) {
+        const data = await r.json();
+        setUser(data.user);
+        setConnections(data.connections || []);
+      } else {
+        localStorage.removeItem('sea_token');
+      }
+    } catch { /* offline */ }
+  }
+
+  async function loadPlatforms() {
+    try {
+      const r = await fetch('/api/platforms');
+      const data = await r.json();
+      setPlatforms(data.platforms || []);
+    } catch { /* ignore */ }
+  }
+
+  async function submitAuth(e) {
+    e.preventDefault();
+    setAuthBusy(true);
+    try {
+      const r = await fetch(authModal === 'login' ? '/api/login' : '/api/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(authModal === 'login'
+          ? { email: authForm.email, password: authForm.password }
+          : { email: authForm.email, password: authForm.password, name: authForm.name }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Failed');
+      localStorage.setItem('sea_token', data.token);
+      setUser(data.user);
+      const me = await fetch('/api/me', { headers: { Authorization: `Bearer ${data.token}` } }).then((x) => x.json());
+      setConnections(me.connections || []);
+      setAuthModal(null);
+      showToast(`Signed in as ${data.user.name || data.user.email} ✓`);
+      loadMemory();
+    } catch (err) {
+      showToast(String(err.message || err));
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  function logout() {
+    localStorage.removeItem('sea_token');
+    setUser(null);
+    setConnections([]);
+    showToast('Signed out');
+  }
+
+  async function connectPlatform(platform) {
+    if (!user) { setAuthModal('login'); return; }
+    try {
+      const r = await fetch(`/api/connect/${platform}/start`, { headers: authHeaders() });
+      const data = await r.json();
+      if (data.demo) {
+        const c = await fetch(BASE_URL + data.confirm_url).then((x) => x.json());
+        if (!c.ok) throw new Error(c.error || 'Connect failed');
+        showToast(c.message);
+      } else if (data.ok === undefined) {
+        window.location.href = r.url; // real OAuth redirect
+        return;
+      }
+      const me = await fetch('/api/me', { headers: authHeaders() }).then((x) => x.json());
+      setConnections(me.connections || []);
+      loadMemory();
+    } catch (err) {
+      showToast(String(err.message || err));
+    }
+  }
+
+  async function disconnectPlatform(platform) {
+    try {
+      await fetch('/api/disconnect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ platform }),
+      });
+      setConnections((cs) => cs.filter((c) => c.platform !== platform));
+      showToast(`${platform} disconnected`);
+    } catch (err) {
+      showToast(String(err.message || err));
+    }
+  }
+
+  const connectedPlatforms = new Set(connections.map((c) => c.platform));
 
   async function recommend() {
     setLoadingRec(true);
     try {
-      const r = await fetch(`/api/recommend?channel=${encodeURIComponent(channel)}`);
+      const r = await fetch(`/api/recommend?channel=${encodeURIComponent(channel)}`, { headers: authHeaders() });
       const data = await r.json();
       if (data.error) throw new Error(data.error);
       setRec(data);
@@ -112,7 +221,7 @@ export default function App() {
     try {
       const r = await fetch('/api/create-ab', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({
           channel,
           hook: form.hook,
@@ -193,7 +302,7 @@ export default function App() {
     try {
       const r = await fetch('/api/reply-suggest', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ comment: c.text }),
       });
       const data = await r.json();
@@ -225,8 +334,81 @@ export default function App() {
             memory: {health?.memory_mode || '…'}
           </Pill>
           <Pill tone="neutral">llm: {health?.llm || '…'}</Pill>
+          {user ? (
+            <>
+              <Pill tone="good">Signed in as {user.name || user.email}</Pill>
+              <button className={btn.small} onClick={logout}>Log out</button>
+            </>
+          ) : (
+            <>
+              <button className={btn.small} onClick={() => setAuthModal('login')}>Sign in</button>
+              <button className={btn.primary} onClick={() => setAuthModal('register')}>Sign up</button>
+            </>
+          )}
         </div>
       </header>
+
+      {authModal && (
+        <div className="modal-backdrop" onClick={() => setAuthModal(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>{authModal === 'login' ? 'Sign in' : 'Create account'}</h3>
+            <form onSubmit={submitAuth} className="auth-form">
+              {authModal === 'register' && (
+                <label className="field">Name
+                  <input value={authForm.name} onChange={(e) => setAuthForm({ ...authForm, name: e.target.value })} placeholder="Sujal" />
+                </label>
+              )}
+              <label className="field">Email
+                <input type="email" required value={authForm.email} onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })} placeholder="you@example.com" />
+              </label>
+              <label className="field">Password
+                <input type="password" required minLength={6} value={authForm.password} onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })} placeholder="6+ characters" />
+              </label>
+              <div className="actions">
+                <button type="submit" className={btn.primary} disabled={authBusy}>
+                  {authBusy ? '…' : authModal === 'login' ? 'Sign in' : 'Create account'}
+                </button>
+                <button type="button" className={btn.secondary} onClick={() => setAuthModal(authModal === 'login' ? 'register' : 'login')}>
+                  {authModal === 'login' ? 'Need an account? Sign up' : 'Have an account? Sign in'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {user && (
+        <section className="card account-panel">
+          <h2>My account</h2>
+          <p className="muted">{user.name} · {user.email}</p>
+          <h3>Connected accounts</h3>
+          <div className="connections">
+            {platforms.map((p) => {
+              const conn = connections.find((c) => c.platform === p.id);
+              return (
+                <div key={p.id} className="connection-row">
+                  <span className="conn-label">{p.label}</span>
+                  {conn ? (
+                    <>
+                      <Pill tone="good">✅ Connected{conn.username ? ` — ${conn.username}` : ''}</Pill>
+                      <button className={btn.small} onClick={() => disconnectPlatform(p.id)}>Disconnect</button>
+                    </>
+                  ) : (
+                    <>
+                      <Pill tone="neutral">❌ Not connected</Pill>
+                      <button className={btn.small} onClick={() => connectPlatform(p.id)}>Connect</button>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <p className="muted small">
+            Connecting retains sample posts into <em>your</em> memory (tagged user + platform);
+            recommendations and A/B winners are then scoped to your account.
+          </p>
+        </section>
+      )}
 
       <main className="grid">
         {/* LEFT: composer */}
@@ -256,7 +438,7 @@ export default function App() {
               <div className="examples">
                 {(rec.examples || []).map((e) => (
                   <div key={String(e.post_id)} className="example">
-                    <Pill tone="good">{e.ctr}% CTR</Pill> <code>post #{e.post_id}</code> {e.text?.slice(0, 70)}
+                    <Pill tone="good">{e.ctr}% {e.metric || 'CTR'}</Pill> <code>{e.platform || 'post'} #{e.post_id}</code> {e.text?.slice(0, 70)}
                     {e.text?.length > 70 ? '…' : ''}
                   </div>
                 ))}

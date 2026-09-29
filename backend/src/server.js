@@ -14,6 +14,19 @@ import {
   llmProviderName,
 } from './llm.js';
 import { createAb, addScheduledPost, getAb, listAbs, simulateResults, saveAb } from './ab.js';
+import {
+  hashPassword,
+  verifyPassword,
+  signJwt,
+  verifyJwt,
+  requireAuth,
+  authOptional,
+  encryptToken,
+  decryptToken,
+} from './auth.js';
+import { initDb, dbEngine, findUserByEmail, createUser, getUser, listConnections, getConnection, upsertConnection, deleteConnection } from './db.js';
+import { PLATFORMS, platformList, platformConfigured, authorizeUrl, exchangeCode, demoIdentity } from './connections.js';
+import { retainUserPosts, retainWinnerForUser, userTags } from './user-memory.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -108,8 +121,143 @@ app.get('/api/health', async (_req, res) => {
     memory_mode: hindsightMode(),
     memory_bank: bankId(),
     llm: llmProviderName(),
+    db: dbEngine(),
+    auth: 'jwt',
   });
 });
+await initDb();
+
+/* =================== AUTH =================== */
+
+// POST /api/register { email, password, name } -> { token, user }
+app.post('/api/register', async (req, res) => {
+  try {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const password = String(req.body?.password || '');
+    const name = String(req.body?.name || '').trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'Valid email required' });
+    if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    if (await findUserByEmail(email)) return res.status(409).json({ error: 'An account with this email already exists' });
+    const user = await createUser({ email, name, passwordHash: hashPassword(password) });
+    const token = signJwt({ sub: user.id, email: user.email, name: user.name });
+    res.json({ ok: true, token, user: { id: user.id, email: user.email, name: user.name } });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+// POST /api/login { email, password } -> { token, user }
+app.post('/api/login', async (req, res) => {
+  try {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const password = String(req.body?.password || '');
+    const user = await findUserByEmail(email);
+    if (!user || !verifyPassword(password, user.password_hash)) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+    const token = signJwt({ sub: user.id, email: user.email, name: user.name });
+    res.json({ ok: true, token, user: { id: user.id, email: user.email, name: user.name } });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+// GET /api/me — current profile + connected accounts (auth required)
+app.get('/api/me', requireAuth, async (req, res) => {
+  const user = await getUser(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  const connections = await listConnections(req.user.id);
+  res.json({
+    user: { id: user.id, email: user.email, name: user.name, created_at: user.created_at },
+    connections: connections.map((c) => ({
+      platform: c.platform,
+      username: c.platform_username,
+      scopes: c.scopes ? c.scopes.split(/[, ]+/).filter(Boolean) : [],
+      connected_at: c.connected_at,
+    })),
+  });
+});
+
+/* ============ CONNECTED ACCOUNTS ============ */
+
+// GET /api/platforms — registry + per-platform OAuth configured?
+app.get('/api/platforms', (_req, res) => {
+  res.json({ platforms: platformList() });
+});
+
+// GET /api/connect/:platform/start — begin OAuth (redirects when configured)
+app.get('/api/connect/:platform/start', requireAuth, (req, res) => {
+  const platform = req.params.platform;
+  if (!PLATFORMS[platform]) return res.status(400).json({ error: `Unknown platform ${platform}` });
+  if (platformConfigured(platform) && PLATFORMS[platform].authUrl) {
+    const state = Buffer.from(JSON.stringify({ uid: req.user.id, platform })).toString('base64url');
+    const redirectUri = `${req.protocol}://${req.get('host')}/api/connect/${platform}/callback`;
+    return res.redirect(authorizeUrl(platform, { redirectUri, state }));
+  }
+  // Demo consent: no provider credentials configured on this deployment.
+  res.json({
+    ok: true,
+    demo: true,
+    platform,
+    label: PLATFORMS[platform].label,
+    scopes: PLATFORMS[platform].scopes,
+    confirm_url: `/api/connect/${platform}/demo?token=${signJwt({ sub: req.user.id, email: req.user.email, name: req.user.name, act: 'connect', platform }, { expiresIn: '1h' })}`,
+  });
+});
+
+// GET /api/connect/:platform/demo?token=... — confirm demo consent
+app.get('/api/connect/:platform/demo', async (req, res) => {
+  const payload = decryptJwtPayload(req.query.token);
+  if (!payload?.act || payload.act !== 'connect') return res.status(400).json({ error: 'Invalid or expired consent token' });
+  const platform = req.params.platform;
+  if (!PLATFORMS[platform]) return res.status(400).json({ error: 'Unknown platform' });
+  const identity = demoIdentity(platform, { id: payload.sub, email: payload.email, name: payload.name });
+  await upsertConnection({
+    userId: payload.sub,
+    platform,
+    platformUserId: identity.platform_user_id,
+    platformUsername: identity.platform_username,
+    scopes: identity.scopes.join(','),
+    accessTokenEnc: encryptToken(identity.access_token),
+  });
+  await retainUserPosts(payload.sub, platform);
+  res.json({ ok: true, demo: true, platform, username: identity.platform_username, message: `${PLATFORMS[platform].label} connected (demo consent) — sample posts retained to your memory` });
+});
+
+// GET /api/connect/:platform/callback — real OAuth callback
+app.get('/api/connect/:platform/callback', async (req, res) => {
+  try {
+    const platform = req.params.platform;
+    if (!PLATFORMS[platform]) return res.status(400).send('Unknown platform');
+    const state = JSON.parse(Buffer.from(String(req.query.state || ''), 'base64url').toString('utf8'));
+    const redirectUri = `${req.protocol}://${req.get('host')}/api/connect/${platform}/callback`;
+    const tokens = await exchangeCode(platform, { code: req.query.code, redirectUri });
+    await upsertConnection({
+      userId: state.uid,
+      platform,
+      platformUserId: tokens.user_id || '',
+      platformUsername: tokens.username || '',
+      scopes: tokens.scope || PLATFORMS[platform].scopes.join(','),
+      accessTokenEnc: encryptToken(tokens.access_token),
+    });
+    await retainUserPosts(state.uid, platform);
+    res.send(`<html><body style="font-family:sans-serif;background:#0b0e14;color:#e8ecf4;text-align:center;padding-top:80px"><h2>✅ ${PLATFORMS[platform].label} connected</h2><p>Posts imported to your memory. You can close this tab.</p></body></html>`);
+  } catch (err) {
+    res.status(500).send(`OAuth callback failed: ${String(err.message || err)}`);
+  }
+});
+
+// POST /api/disconnect { platform }
+app.post('/api/disconnect', requireAuth, async (req, res) => {
+  const platform = String(req.body?.platform || '');
+  if (!PLATFORMS[platform]) return res.status(400).json({ error: 'Unknown platform' });
+  await deleteConnection(req.user.id, platform);
+  res.json({ ok: true, platform });
+});
+
+function decryptJwtPayload(token) {
+  return verifyJwt(token);
+}
 
 // POST /api/import — seed Hindsight with posts + comments from CSVs
 app.post('/api/import', async (_req, res) => {
@@ -135,16 +283,20 @@ app.post('/api/import', async (_req, res) => {
 });
 
 // GET /api/recommend?channel=linkedin&topic=... — memory-informed recommendation
-app.get('/api/recommend', async (req, res) => {
+// Signed-in users get recall scoped to their own memories (user:<id> + platform).
+app.get('/api/recommend', authOptional, async (req, res) => {
   try {
     const channel = String(req.query.channel || 'linkedin');
     const topic = String(req.query.topic || '');
+    const scopeTags = req.user
+      ? userTags(req.user.id, await platformIfConnected(req.user.id, channel))
+      : ['top_performer'];
     // 1. Recall high-CTR winners from Hindsight memory.
     let facts = [];
     try {
       facts = await recall(
         `highest CTR posts about integrations, demos, before/after results${topic ? `, topic ${topic}` : ''}`,
-        { tags: ['top_performer'], limit: 8 }
+        { tags: req.user ? scopeTags.filter((t) => !t.startsWith('platform:') || t !== `platform:${channel}`) : scopeTags, limit: 8 }
       );
       if (facts.length < 3) {
         const more = await recall('posts with best click-through rate and engagement', { limit: 10 });
@@ -154,28 +306,51 @@ app.get('/api/recommend', async (req, res) => {
     } catch (err) {
       console.error('[recommend] recall failed:', err.message);
     }
-    // 2. Map facts back to numeric CTR and pick the top examples.
+    // 2. Map facts back to a numeric score + metric label, then dedupe.
+    //    Per-platform metrics differ (CTR on LinkedIn/X, save-rate on
+    //    Instagram/Pinterest, engagement on TikTok/YouTube), so the label is
+    //    carried through to the provenance line. Hindsight also derives
+    //    'observation' facts from each post — dedupe by post_id.
+    const seen = new Set();
     const examples = facts
-      .map((f) => ({
-        post_id: f.metadata?.post_id || '?',
-        text: f.metadata?.text || f.text,
-        ctr: Number(f.metadata?.ctr_percent || 0),
-        platform: f.metadata?.platform || channel,
-      }))
-      .filter((e) => e.text)
+      .map((f) => {
+        const m = f.metadata || {};
+        const metric = m.ctr_percent ? 'CTR' : m.metric_name === 'save_rate_percent' ? 'saves' : 'engagement';
+        const value = Number(m.ctr_percent || m.metric_value || 0);
+        return {
+          post_id: m.post_id || '?',
+          text: m.text || f.text,
+          ctr: value,
+          metric,
+          platform: m.platform || channel,
+        };
+      })
+      .filter((e) => {
+        if (!e.text || !e.ctr) return false;
+        const key = `${e.platform}:${e.post_id}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
       .sort((a, b) => b.ctr - a.ctr)
       .slice(0, 3);
     // 3. LLM generates hook/caption/hashtags/best_time + provenance line.
     const rec = await generateRecommendation({ channel, topic, examples });
-    res.json({ ...rec, channel, examples, memory_mode: hindsightMode() });
+    res.json({ ...rec, channel, examples, memory_mode: hindsightMode(), scoped: Boolean(req.user) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: String(err.message || err) });
   }
 });
 
+/** platform tag only if the user actually connected that platform */
+async function platformIfConnected(userId, platform) {
+  const c = await getConnection(userId, platform);
+  return c ? platform : null;
+}
+
 // POST /api/create-ab { channel, topic, hook, hook_b, caption, hashtags, best_time }
-app.post('/api/create-ab', (req, res) => {
+app.post('/api/create-ab', authOptional, (req, res) => {
   const { channel = 'linkedin', topic = '', hook = '', hook_b = '', caption = '', hashtags = [], best_time = '' } = req.body || {};
   if (!hook || !hook_b) return res.status(400).json({ error: 'hook and hook_b are required' });
   const test = createAb({
@@ -184,6 +359,8 @@ app.post('/api/create-ab', (req, res) => {
     variantA: { hook, caption, hashtags, best_time },
     variantB: { hook: hook_b, caption, hashtags, best_time },
   });
+  test.user_id = req.user?.id || null;
+  saveAb(test);
   res.json({ ok: true, ab_id: test.id, test });
 });
 
@@ -204,6 +381,7 @@ app.post('/api/schedule', (req, res) => {
 });
 
 // GET /api/ab-results/:id — simulate metrics, pick winner, write winner back to Hindsight
+// Winner memory is tagged with the owning user + platform when the test has a user.
 app.get('/api/ab-results/:id', async (req, res) => {
   try {
     const test = getAb(req.params.id);
@@ -220,7 +398,11 @@ app.get('/api/ab-results/:id', async (req, res) => {
         platform: test.channel,
         why: test.variants.A.why || 'hook pattern matched the account top performers in memory',
       });
-      await retain([writeback]);
+      if (test.user_id) {
+        await retainWinnerForUser(test.user_id, test.channel, writeback);
+      } else {
+        await retain([writeback]);
+      }
       test.writeback = writeback;
       saveAb(test);
     }
@@ -245,13 +427,14 @@ app.get('/api/ab-tests', (_req, res) => {
 });
 
 // POST /api/reply-suggest { comment } — reply template + tag, recall-augmented
-app.post('/api/reply-suggest', async (req, res) => {
+app.post('/api/reply-suggest', authOptional, async (req, res) => {
   try {
     const comment = String(req.body?.comment || '').trim();
     if (!comment) return res.status(400).json({ error: 'comment text is required' });
     let similar = [];
     try {
-      similar = await recall(`comments similar to: ${comment}`, { limit: 5 });
+      const tags = req.user ? userTags(req.user.id) : [];
+      similar = await recall(`comments similar to: ${comment}`, { limit: 5, ...(tags.length ? { tags } : {}) });
     } catch (err) {
       console.error('[reply] recall failed:', err.message);
     }
@@ -286,9 +469,14 @@ app.get('/api/comments', (_req, res) => {
 });
 
 // GET /api/memory — show what is stored in Hindsight (provenance / transparency panel)
-app.get('/api/memory', async (_req, res) => {
+// Signed-in users see only their own memories; anonymous callers see the shared demo pool.
+app.get('/api/memory', authOptional, async (req, res) => {
   try {
-    const items = await listMemories({ limit: 100 });
+    const all = await listMemories({ limit: 300 });
+    const isUserTag = (m) => (m.tags || []).some((t) => t.startsWith('user:'));
+    const items = req.user
+      ? all.filter((m) => (m.tags || []).includes(`user:${req.user.id}`))
+      : all.filter((m) => !isUserTag(m));
     // Keep only primary top_hook memories (metadata.hook set). Hindsight also
     // derives 'observation' facts from them with empty metadata — good memory,
     // but noisy as UI rows.
@@ -298,6 +486,7 @@ app.get('/api/memory', async (_req, res) => {
     res.json({
       mode: hindsightMode(),
       bank: bankId(),
+      scope: req.user ? `user:${req.user.id}` : 'shared-demo',
       total: items.length,
       top_hooks: hooks,
       posts: posts.slice(0, 20),
@@ -319,5 +508,5 @@ if (fs.existsSync(distDir)) {
 app.listen(PORT, () => {
   console.log(`Engagement agent backend on http://localhost:${PORT}`);
   console.log(`Memory: bank=${bankId()} (set HINDSIGHT_BASE_URL to use Hindsight; file fallback otherwise)`);
-  console.log(`LLM: ${llmProviderName()}`);
+  console.log(`LLM: ${llmProviderName()} | DB: ${dbEngine()} | Auth: JWT`);
 });

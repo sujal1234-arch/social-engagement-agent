@@ -60,8 +60,32 @@ Everything is optional — the app degrades gracefully so the demo always runs:
 | `HINDSIGHT_BASE_URL=http://localhost:8888` | Local Hindsight OSS server | same fallback |
 | `GROQ_API_KEY` or `OPENAI_API_KEY` | LLM for hooks/captions/replies | deterministic template fallback |
 | `HINDSIGHT_BANK_ID` | memory bank name | `social-engagement-agent` |
+| `AUTH_SECRET` | JWT signing + AES-256-GCM token encryption | dev fallback secret (set this in production) |
+| `<PLATFORM>_CLIENT_ID` / `_SECRET` (e.g. `LINKEDIN_`, `INSTAGRAM_`, `GOOGLE_`, `X_`, `FACEBOOK_`, `PINTEREST_`, `REDDIT_`) | real OAuth for connecting social accounts | clearly-labelled **demo consent** flow (same full connect → import → per-user memory path) |
+| `TELEGRAM_BOT_TOKEN` | Telegram/WhatsApp channel | demo consent |
 
 The header pills in the UI show which mode is active (`memory: hindsight` vs `memory: fallback`).
+
+## Accounts, connections & per-user memory
+
+Sign up (email + password, `scrypt` hashed) to get a JWT. Users and connected accounts live in SQLite (`data/agent.db`, via `node:sqlite`) with a JSON-file fallback; platform access tokens are stored AES-256-GCM encrypted.
+
+Connecting a platform (`Connect Instagram`, …) stores the account and retains that platform's sample posts into memory tagged `user:<id>` + `platform:<platform>`. From then on `/api/recommend` recalls **only that user's** history for that platform, the A/B winner is written back into their personal memory, and `/api/memory` shows their own pool:
+
+```
+Provenance: • instagram reel_12 — 8% saves  • instagram reel_07 — 6.5% saves
+```
+
+Anonymous callers still get the shared demo pool, so the hosted demo and landing-page widget keep working without sign-in:
+
+| Endpoint | Description |
+|---|---|
+| `POST /api/register` / `POST /api/login` | `{email, password, name?}` → `{token, user}` (JWT, 7d) |
+| `GET /api/me` | profile + connected accounts |
+| `GET /api/platforms` | platform registry (scopes, whether real OAuth is configured) |
+| `GET /api/connect/:platform/start` | starts OAuth (redirect) or returns a demo-consent confirm URL |
+| `GET /api/connect/:platform/callback` | real OAuth callback → stores encrypted token + imports posts |
+| `POST /api/disconnect` | `{platform}` → revoke + forget |
 
 ## How Hindsight is used
 
@@ -79,8 +103,8 @@ The header pills in the UI show which mode is active (`memory: hindsight` vs `me
 | `POST /api/schedule` | Schedule a variant `{ab_id, variant, time?}` (mock scheduler) |
 | `GET /api/ab-results/:id` | Simulated metrics + winner; writes winner back to Hindsight |
 | `POST /api/reply-suggest` | `{comment}` → `{reply, tag}` (recall-augmented) |
-| `GET /api/memory` | Memory panel: stored posts, comments, top hooks |
-| `GET /api/health` | Memory mode + LLM provider status |
+| `GET /api/memory` (signed in) | only that user's retained posts / hooks |
+| `GET /api/health` | Memory mode + LLM provider + DB engine status |
 
 A/B metrics are a deterministic simulation (memory-informed variant lands at ~5–6.4% CTR vs ~1.5–2.1% control, matching the real distribution in the seed data) so the demo is stable and reproducible.
 
