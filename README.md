@@ -63,7 +63,8 @@ Everything is optional — the app degrades gracefully so the demo always runs:
 | `AUTH_SECRET` | JWT signing + AES-256-GCM token encryption | dev fallback secret (set this in production) |
 | `DATABASE_URL` | Postgres for users + connected accounts (survives redeploys) | SQLite (`data/agent.db`), then a JSON file |
 | `AUTH_DEV_MODE=1` | returns `dev_reset_token` from the reset-request endpoint (local testing) | token is not returned (wire SMTP to email it) |
-| `<PLATFORM>_CLIENT_ID` / `_SECRET` (e.g. `LINKEDIN_`, `INSTAGRAM_`, `GOOGLE_`, `X_`, `FACEBOOK_`, `PINTEREST_`, `REDDIT_`) | real OAuth for connecting social accounts | clearly-labelled **demo consent** flow (same full connect → import → per-user memory path) |
+| `<PLATFORM>_CLIENT_ID` / `_SECRET` (e.g. `LINKEDIN_`, `INSTAGRAM_`, `X_`, `FACEBOOK_`, `PINTEREST_`, `REDDIT_`) | real OAuth for connecting social accounts | clearly-labelled **demo consent** flow (same full connect → import → per-user memory path) |
+| `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` | real **Google sign-in** (the same client also covers the YouTube connection) | labelled demo sign-in modal with the same account/personal-memory behavior |
 | `TELEGRAM_BOT_TOKEN` | Telegram/WhatsApp channel | demo consent |
 
 The header pills in the UI show which mode is active (`memory: hindsight` vs `memory: fallback`).
@@ -88,7 +89,7 @@ Accounts, connected platform tokens and one-time tokens are stored in the first 
 
 ## Accounts, connections & per-user memory
 
-Sign up (email + password, `scrypt` hashed) to get a JWT. Users and connected accounts live in SQLite (`data/agent.db`, via `node:sqlite`) with a JSON-file fallback; platform access tokens are stored AES-256-GCM encrypted.
+Sign in with **Google** (real consent screen when `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` are set, otherwise a labelled demo sign-in) or with email + password (`scrypt` hashed). Users and connected accounts live in the first store available (Postgres → SQLite → JSON); platform access tokens are stored AES-256-GCM encrypted.
 
 Connecting a platform (`Connect Instagram`, …) stores the account and retains that platform's sample posts into memory tagged `user:<id>` + `platform:<platform>`. From then on `/api/recommend` recalls **only that user's** history for that platform, the A/B winner is written back into their personal memory, and `/api/memory` shows their own pool:
 
@@ -101,6 +102,9 @@ Anonymous callers still get the shared demo pool, so the hosted demo and landing
 | Endpoint | Description |
 |---|---|
 | `POST /api/register` / `POST /api/login` | `{email, password, name?}` → `{token, refresh_token, user}` (JWT 7d, refresh 30d) |
+| `GET /api/auth/google/start` | redirects to Google consent (or reports demo mode) |
+| `POST /api/auth/google/exchange` | trades the redirect code for a session |
+| `POST /api/auth/google/demo` | labelled demo sign-in → `{token, refresh_token, user}` |
 | `POST /api/refresh` | `{refresh_token}` → rotated token pair |
 | `POST /api/logout` | revoke the caller's refresh tokens |
 | `POST /api/password/reset-request` / `POST /api/password/reset` | single-use reset token (30 min) |
@@ -109,6 +113,9 @@ Anonymous callers still get the shared demo pool, so the hosted demo and landing
 | `GET /api/connect/:platform/start` | starts OAuth (redirect) or returns a demo-consent confirm URL |
 | `GET /api/connect/:platform/callback` | real OAuth callback → stores encrypted token + imports posts |
 | `POST /api/disconnect` | `{platform}` → revoke + forget |
+| `GET/POST /api/preferences` | memory scope: `personal` (default) or `team` |
+
+**Memory scope** — every account defaults to recalling only its own memories. The **My account** panel has a Personal-only / Team-wide toggle: team-wide widens recall to the shared pool (your posts + everyone's), so a team can share one agent brain. The choice is stored per user in the DB and applied server-side in `/api/recommend` and `/api/memory`.
 
 ## How Hindsight is used
 

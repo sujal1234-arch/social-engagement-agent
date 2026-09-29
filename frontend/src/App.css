@@ -208,6 +208,28 @@ body {
 .footer code { color: var(--accent); }
 
 /* ---- auth & connected accounts ---- */
+.google-btn {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  width: 100%; padding: 10px 14px; margin: 4px 0 0;
+  font: inherit; font-weight: 600; cursor: pointer;
+  background: #fff; color: #1f2430;
+  border: 1px solid #d7dbe3; border-radius: 8px;
+}
+.google-btn:hover { background: #f4f6fa; }
+.google-btn:disabled { opacity: .6; cursor: default; }
+.google-btn .g-mark {
+  font-weight: 800; font-size: 15px;
+  background: conic-gradient(from -45deg, #ea4335 0 25%, #fbbc05 25% 50%, #34a853 50% 75%, #4285f4 75% 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.divider {
+  display: flex; align-items: center; gap: 10px;
+  margin: 14px 0 10px; color: var(--muted); font-size: 12px;
+}
+.divider::before, .divider::after {
+  content: ''; flex: 1; height: 1px; background: var(--border);
+}
+.scope-toggle { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
 .auth-form { display: flex; flex-direction: column; gap: 4px; }
 .auth-form .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .account-panel { margin-top: 16px; }

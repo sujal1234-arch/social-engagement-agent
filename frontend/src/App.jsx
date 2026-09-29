@@ -28,9 +28,12 @@ export default function App() {
   const [authModal, setAuthModal] = useState(null); // 'login' | 'register'
   const [authForm, setAuthForm] = useState({ email: '', password: '', name: '' });
   const [authBusy, setAuthBusy] = useState(false);
+  const [googleForm, setGoogleForm] = useState({ email: '', name: '' });
   const [connections, setConnections] = useState([]);
   const [platforms, setPlatforms] = useState([]);
   const [memTab, setMemTab] = useState('all');
+  const [shareScope, setShareScope] = useState('personal');
+  const [googleDemo, setGoogleDemo] = useState(null);
   const [form, setForm] = useState({
     hook: '',
     hook_b: '',
@@ -85,7 +88,96 @@ export default function App() {
     loadComments();
     loadPlatforms();
     restoreSession();
+    handleGoogleRedirect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadHealth, loadMemory, loadComments]);
+
+  // Completes a real Google redirect: the backend hands back a short-lived code
+  // in the query string, which we trade for a session.
+  async function handleGoogleRedirect() {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('google_auth');
+    const err = params.get('google_error');
+    if (!code && !err) return;
+    window.history.replaceState({}, '', window.location.pathname);
+    if (err) { showToast(`Google sign-in failed: ${err}`); return; }
+    try {
+      const r = await fetch('/api/auth/google/exchange', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Google sign-in failed');
+      localStorage.setItem('sea_token', data.token);
+      if (data.refresh_token) localStorage.setItem('sea_refresh', data.refresh_token);
+      setUser(data.user);
+      setConnections(data.connections || []);
+      loadMemory();
+      showToast(`Signed in as ${data.user.name || data.user.email} ✓`);
+    } catch (e2) {
+      showToast(String(e2.message || e2));
+    }
+  }
+
+  async function signInWithGoogle() {
+    setAuthBusy(true);
+    try {
+      const r = await fetch('/api/auth/google/start');
+      const data = await r.json();
+      if (data.url) { window.location.href = data.url; return; } // real consent screen
+      setGoogleDemo(true); // no credentials configured -> labelled demo
+    } catch (e) {
+      showToast(String(e.message || e));
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  async function submitGoogleDemo(e) {
+    e.preventDefault();
+    setAuthBusy(true);
+    try {
+      const r = await fetch('/api/auth/google/demo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(googleForm),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Google sign-in failed');
+      localStorage.setItem('sea_token', data.token);
+      if (data.refresh_token) localStorage.setItem('sea_refresh', data.refresh_token);
+      setUser(data.user);
+      const me = await fetch('/api/me', { headers: { Authorization: `Bearer ${data.token}` } }).then((x) => x.json());
+      setConnections(me.connections || []);
+      setGoogleDemo(null);
+      setAuthModal(null);
+      loadMemory();
+      showToast(`Signed in as ${data.user.name || data.user.email} ✓`);
+    } catch (err) {
+      showToast(String(err.message || err));
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  async function updateShareScope(next) {
+    setShareScope(next);
+    try {
+      const r = await apiFetch('/api/preferences', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ share_scope: next }),
+      });
+      if (!r.ok) throw new Error('Could not save preference');
+      loadMemory();
+      showToast(next === 'team'
+        ? 'Now recalling team-wide memory (your posts + shared pool)'
+        : 'Now recalling only your personal memory');
+    } catch (err) {
+      showToast(String(err.message || err));
+    }
+  }
 
   const authHeaders = useCallback(() => {
     const t = localStorage.getItem('sea_token');
@@ -127,6 +219,7 @@ export default function App() {
         const data = await r.json();
         setUser(data.user);
         setConnections(data.connections || []);
+        if (data.user?.share_scope) setShareScope(data.user.share_scope);
       } else {
         localStorage.removeItem('sea_token');
       }
@@ -159,6 +252,7 @@ export default function App() {
       setUser(data.user);
       const me = await fetch('/api/me', { headers: { Authorization: `Bearer ${data.token}` } }).then((x) => x.json());
       setConnections(me.connections || []);
+      if (me.user?.share_scope) setShareScope(me.user.share_scope);
       setAuthModal(null);
       showToast(`Signed in as ${data.user.name || data.user.email} ✓`);
       loadMemory();
@@ -382,6 +476,10 @@ export default function App() {
         <div className="modal-backdrop" onClick={() => setAuthModal(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h3>{authModal === 'login' ? 'Sign in' : 'Create account'}</h3>
+            <button type="button" className="google-btn" onClick={signInWithGoogle} disabled={authBusy}>
+              <span className="g-mark">G</span> Continue with Google
+            </button>
+            <p className="divider"><span>or use email</span></p>
             <form onSubmit={submitAuth} className="auth-form">
               {authModal === 'register' && (
                 <label className="field">Name
@@ -407,10 +505,59 @@ export default function App() {
         </div>
       )}
 
+      {googleDemo && (
+        <div className="modal-backdrop" onClick={() => setGoogleDemo(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Continue with Google</h3>
+            <p className="muted small">
+              Google client credentials are not configured on this deployment, so this is a
+              labelled stand-in for the consent screen. Set <code>GOOGLE_CLIENT_ID</code> and
+              {' '}<code>GOOGLE_CLIENT_SECRET</code> to use the real Google sign-in.
+            </p>
+            <form onSubmit={submitGoogleDemo} className="auth-form">
+              <label className="field">Name
+                <input value={googleForm.name} onChange={(e) => setGoogleForm({ ...googleForm, name: e.target.value })} placeholder="Sujal" />
+              </label>
+              <label className="field">Google email
+                <input type="email" required value={googleForm.email} onChange={(e) => setGoogleForm({ ...googleForm, email: e.target.value })} placeholder="you@gmail.com" />
+              </label>
+              <div className="actions">
+                <button type="submit" className={btn.primary} disabled={authBusy}>
+                  {authBusy ? '…' : 'Continue'}
+                </button>
+                <button type="button" className={btn.secondary} onClick={() => setGoogleDemo(null)}>Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {user && (
         <section className="card account-panel">
           <h2>My account</h2>
           <p className="muted">{user.name} · {user.email}</p>
+          <h3>Memory scope</h3>
+          <div className="scope-toggle">
+            <button
+              type="button"
+              className={shareScope === 'personal' ? btn.primary : btn.small}
+              onClick={() => updateShareScope('personal')}
+            >
+              🔒 Personal only
+            </button>
+            <button
+              type="button"
+              className={shareScope === 'team' ? btn.primary : btn.small}
+              onClick={() => updateShareScope('team')}
+            >
+              👥 Team-wide
+            </button>
+          </div>
+          <p className="muted small">
+            {shareScope === 'team'
+              ? 'Recalling your own memory plus the shared team pool.'
+              : 'Recalling only posts and comments from your connected accounts.'}
+          </p>
           <h3>Connected accounts</h3>
           <div className="connections">
             {platforms.map((p) => {
@@ -655,7 +802,13 @@ export default function App() {
 
           {memory?.scope && (
             <p className="muted small">
-              scope: {memory.scope === 'shared-demo' ? 'shared demo pool (sign in for your own)' : 'your private memory'}
+              scope: {
+                memory.share_scope === 'shared-demo'
+                  ? 'shared demo pool (sign in for your own)'
+                  : memory.share_scope === 'team'
+                    ? `your memory + team pool (${memory.scope})`
+                    : `your private memory (${memory.scope})`
+              }
               {memTab !== 'all' ? ` · filtered to ${memTab}` : ''}
             </p>
           )}

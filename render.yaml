@@ -37,6 +37,12 @@ services:
         sync: false
       - key: HINDSIGHT_API_KEY
         sync: false
+      # Google sign-in. Optional: without these the app still works and offers a
+      # labelled demo sign-in instead of the real consent screen.
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
       - key: HINDSIGHT_BANK_ID
         value: social-engagement-agent
       - key: GROQ_API_KEY

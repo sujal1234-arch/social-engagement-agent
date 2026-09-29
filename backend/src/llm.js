@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import './load-env.js';
 
 const GROQ_KEY = process.env.GROQ_API_KEY || '';
 const OPENAI_KEY = process.env.OPENAI_API_KEY || '';

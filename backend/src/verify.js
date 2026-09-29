@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import './load-env.js';
 
 /**
  * One-command Hindsight Cloud smoke test.

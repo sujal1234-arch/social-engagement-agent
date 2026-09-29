@@ -1,8 +1,9 @@
-import 'dotenv/config';
+import './load-env.js';
 import express from 'express';
 import cors from 'cors';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { readCsv, toInt } from './csv.js';
 import { retain, recall, listMemories, hindsightMode, bankId, ensureBank } from './hindsight.js';
@@ -42,10 +43,13 @@ import {
   consumeToken,
   revokeTokensForUser,
   setUserPassword,
+  getShareScope,
+  setShareScope,
 } from './db.js';
 import { PLATFORMS, platformList, platformConfigured, authorizeUrl, exchangeCode, demoIdentity } from './connections.js';
 import { retainUserPosts, retainWinnerForUser, userTags } from './user-memory.js';
 import { fetchPlatformMetrics, metricLabelFor } from './metrics.js';
+import { googleConfigured, googleAuthorizeUrl, googleExchangeCode, googleUserInfo } from './google-auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -263,13 +267,103 @@ app.post(
 }
 );
 
+/* ============ GOOGLE SIGN-IN ============ */
+
+// GET /api/auth/google/start — redirect to Google, or report demo mode
+app.get('/api/auth/google/start', (req, res) => {
+  if (!googleConfigured()) {
+    return res.json({
+      ok: true,
+      demo: true,
+      message: 'GOOGLE_CLIENT_ID/SECRET are not configured — using demo Google sign-in.',
+    });
+  }
+  const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/google/callback`;
+  const state = crypto.randomBytes(16).toString('base64url');
+  res.redirect(googleAuthorizeUrl({ redirectUri, state }));
+});
+
+// POST /api/auth/google/demo { email, name } — labelled demo sign-in
+app.post(
+  '/api/auth/google/demo',
+  rateLimit({ windowMs: 15 * 60_000, max: 20, keyFn: (req) => `gdemo:${req.ip}` }),
+  async (req, res) => {
+    try {
+      const email = String(req.body?.email || '').trim().toLowerCase();
+      const name = String(req.body?.name || '').trim() || email.split('@')[0];
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'Valid email required' });
+      const user = await findOrCreateOAuthUser({ email, name });
+      const token = signJwt({ sub: user.id, email: user.email, name: user.name });
+      const refresh_token = await issueRefreshToken(user);
+      res.json({ ok: true, demo: true, token, refresh_token, user: { id: user.id, email: user.email, name: user.name } });
+    } catch (err) {
+      res.status(500).json({ error: String(err.message || err) });
+    }
+  }
+);
+
+// GET /api/auth/google/callback — real OAuth redirect from Google
+app.get('/api/auth/google/callback', async (req, res) => {
+  try {
+    const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/google/callback`;
+    const tokens = await googleExchangeCode({ code: req.query.code, redirectUri });
+    const profile = await googleUserInfo(tokens.access_token);
+    if (!profile.email) throw new Error('Google did not return an email');
+    const user = await findOrCreateOAuthUser({ email: profile.email, name: profile.name });
+    // Hand the browser a short-lived signed code, never the session token itself.
+    const code = signJwt({ sub: user.id, email: user.email, name: user.name, act: 'google' }, { expiresIn: '5m' });
+    res.redirect(`/?google_auth=${encodeURIComponent(code)}`);
+  } catch (err) {
+    res.redirect(`/?google_error=${encodeURIComponent(String(err.message || err))}`);
+  }
+});
+
+// POST /api/auth/google/exchange { code } — trade the redirect code for a session
+app.post('/api/auth/google/exchange', async (req, res) => {
+  const payload = verifyJwt(String(req.body?.code || ''));
+  if (!payload?.act || payload.act !== 'google') return res.status(400).json({ error: 'Invalid or expired sign-in code' });
+  const user = await getUser(payload.sub);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  const token = signJwt({ sub: user.id, email: user.email, name: user.name });
+  const refresh_token = await issueRefreshToken(user);
+  res.json({ ok: true, token, refresh_token, user: { id: user.id, email: user.email, name: user.name } });
+});
+
+/** Create the account on first Google sign-in; link to it afterwards. */
+async function findOrCreateOAuthUser({ email, name }) {
+  const existing = await findUserByEmail(email);
+  if (existing) return existing;
+  // No usable password for OAuth-only accounts (never guessable).
+  const unusable = `oauth:${crypto.randomBytes(24).toString('base64url')}`;
+  return createUser({ email, name, passwordHash: hashPassword(unusable) });
+}
+
+/* ============ PREFERENCES ============ */
+
+// GET /api/preferences — memory sharing scope
+app.get('/api/preferences', requireAuth, async (req, res) => {
+  res.json({ share_scope: await getShareScope(req.user.id) });
+});
+
+// POST /api/preferences { share_scope: 'personal' | 'team' }
+app.post('/api/preferences', requireAuth, async (req, res) => {
+  const scope = await setShareScope(req.user.id, String(req.body?.share_scope || 'personal'));
+  res.json({ ok: true, share_scope: scope });
+});
+
 // GET /api/me — current profile + connected accounts (auth required)
 app.get('/api/me', requireAuth, async (req, res) => {
   const user = await getUser(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
   const connections = await listConnections(req.user.id);
   res.json({
-    user: { id: user.id, email: user.email, name: user.name, created_at: user.created_at },
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      created_at: user.created_at,
+      share_scope: await getShareScope(user.id),
+    },
     connections: connections.map((c) => ({
       platform: c.platform,
       username: c.platform_username,
@@ -389,6 +483,7 @@ app.get('/api/recommend', authOptional, async (req, res) => {
   try {
     const channel = String(req.query.channel || 'linkedin');
     const topic = String(req.query.topic || '');
+    const teamScope = req.user ? (await getShareScope(req.user.id)) === 'team' : false;
     const scopeTags = req.user
       ? userTags(req.user.id, await platformIfConnected(req.user.id, channel))
       : ['top_performer'];
@@ -399,7 +494,10 @@ app.get('/api/recommend', authOptional, async (req, res) => {
         `highest CTR posts about integrations, demos, before/after results${topic ? `, topic ${topic}` : ''}`,
         { tags: req.user ? scopeTags.filter((t) => !t.startsWith('platform:') || t !== `platform:${channel}`) : scopeTags, limit: 8 }
       );
-      if (facts.length < 3) {
+      // Personal scope: fall back to the shared pool only when the user's own
+      // history is thin. Team scope: always blend both, so recall spans accounts.
+      const wantShared = !req.user || teamScope || facts.length < 3;
+      if (wantShared) {
         const more = await recall('posts with best click-through rate and engagement', { limit: 10 });
         const seen = new Set(facts.map((f) => f.metadata?.post_id));
         facts = facts.concat(more.filter((f) => !seen.has(f.metadata?.post_id)));
@@ -437,7 +535,14 @@ app.get('/api/recommend', authOptional, async (req, res) => {
       .slice(0, 3);
     // 3. LLM generates hook/caption/hashtags/best_time + provenance line.
     const rec = await generateRecommendation({ channel, topic, examples });
-    res.json({ ...rec, channel, examples, memory_mode: hindsightMode(), scoped: Boolean(req.user) });
+    res.json({
+      ...rec,
+      channel,
+      examples,
+      memory_mode: hindsightMode(),
+      scoped: Boolean(req.user),
+      memory_scope: req.user ? (teamScope ? 'team' : 'personal') : 'shared-demo',
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: String(err.message || err) });
@@ -593,8 +698,9 @@ app.get('/api/memory', authOptional, async (req, res) => {
   try {
     const all = await listMemories({ limit: 300 });
     const isUserTag = (m) => (m.tags || []).some((t) => t.startsWith('user:'));
+    const shareTeam = req.user ? (await getShareScope(req.user.id)) === 'team' : false;
     const items = req.user
-      ? all.filter((m) => (m.tags || []).includes(`user:${req.user.id}`))
+      ? all.filter((m) => (m.tags || []).includes(`user:${req.user.id}`) || (shareTeam && !isUserTag(m)))
       : all.filter((m) => !isUserTag(m));
     // Keep only primary top_hook memories (metadata.hook set). Hindsight also
     // derives 'observation' facts from them with empty metadata — good memory,
@@ -606,6 +712,7 @@ app.get('/api/memory', authOptional, async (req, res) => {
       mode: hindsightMode(),
       bank: bankId(),
       scope: req.user ? `user:${req.user.id}` : 'shared-demo',
+      share_scope: req.user ? (shareTeam ? 'team' : 'personal') : 'shared-demo',
       total: items.length,
       top_hooks: hooks,
       posts: posts.slice(0, 20),

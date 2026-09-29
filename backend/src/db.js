@@ -34,8 +34,10 @@ async function createTablesPg(pool) {
       email TEXT UNIQUE NOT NULL,
       name TEXT,
       password_hash TEXT NOT NULL,
+      share_scope TEXT DEFAULT 'personal',
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS share_scope TEXT DEFAULT 'personal';
     CREATE TABLE IF NOT EXISTS connections (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -84,7 +86,8 @@ async function tryInitSqlite() {
     d.exec(`
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, name TEXT,
-        password_hash TEXT NOT NULL, created_at TEXT NOT NULL
+        password_hash TEXT NOT NULL, share_scope TEXT DEFAULT 'personal',
+        created_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS connections (
         id TEXT PRIMARY KEY, user_id TEXT NOT NULL, platform TEXT NOT NULL,
@@ -97,6 +100,12 @@ async function tryInitSqlite() {
         expires_at TEXT NOT NULL, used_at TEXT
       );
     `);
+    // Migration for databases created before share_scope existed.
+    try {
+      d.exec("ALTER TABLE users ADD COLUMN share_scope TEXT DEFAULT 'personal'");
+    } catch {
+      /* column already present */
+    }
     return d;
   } catch {
     return null;
@@ -107,6 +116,7 @@ function loadJson() {
   try {
     const data = JSON.parse(fs.readFileSync(jsonPath(), 'utf8'));
     data.tokens ||= [];
+    for (const u of data.users || []) u.share_scope ||= 'personal';
     return data;
   } catch {
     return { users: [], connections: [], tokens: [] };
@@ -155,17 +165,43 @@ export async function createUser({ email, name, passwordHash }) {
   const created = new Date().toISOString();
   if (engine === 'postgres') {
     await pg.pool.query(
-      'INSERT INTO users (id, email, name, password_hash, created_at) VALUES ($1, $2, $3, $4, $5)',
-      [id, e, name || '', passwordHash, created]
+      'INSERT INTO users (id, email, name, password_hash, share_scope, created_at) VALUES ($1, $2, $3, $4, $5, $6)',
+      [id, e, name || '', passwordHash, 'personal', created]
     );
   } else if (engine === 'sqlite') {
-    sq.prepare('INSERT INTO users (id, email, name, password_hash, created_at) VALUES (?, ?, ?, ?, ?)')
-      .run(id, e, name || '', passwordHash, created);
+    sq.prepare('INSERT INTO users (id, email, name, password_hash, share_scope, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(id, e, name || '', passwordHash, 'personal', created);
   } else {
-    json.users.push({ id, email: e, name: name || '', password_hash: passwordHash, created_at: created });
+    json.users.push({ id, email: e, name: name || '', password_hash: passwordHash, share_scope: 'personal', created_at: created });
     saveJson();
   }
   return { id, email: e, name: name || '', created_at: created };
+}
+
+/** 'personal' (only your own memory) or 'team' (also recall the shared pool). */
+export async function getShareScope(userId) {
+  if (engine === 'postgres') {
+    const r = await pg.pool.query('SELECT share_scope FROM users WHERE id = $1', [userId]);
+    return r.rows[0]?.share_scope || 'personal';
+  }
+  if (engine === 'sqlite') {
+    return sq.prepare('SELECT share_scope FROM users WHERE id = ?').get(userId)?.share_scope || 'personal';
+  }
+  return json.users.find((u) => u.id === userId)?.share_scope || 'personal';
+}
+
+export async function setShareScope(userId, scope) {
+  const value = scope === 'team' ? 'team' : 'personal';
+  if (engine === 'postgres') await pg.pool.query('UPDATE users SET share_scope = $2 WHERE id = $1', [userId, value]);
+  else if (engine === 'sqlite') sq.prepare('UPDATE users SET share_scope = ? WHERE id = ?').run(value, userId);
+  else {
+    const u = json.users.find((x) => x.id === userId);
+    if (u) {
+      u.share_scope = value;
+      saveJson();
+    }
+  }
+  return value;
 }
 
 export async function getUser(id) {
