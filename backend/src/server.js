@@ -253,11 +253,13 @@ app.post(
       return res.status(401).json({ error: 'Invalid email or password' });
     }
     const token = signJwt({ sub: user.id, email: user.email, name: user.name });
-    res.json({ ok: true, token, user: { id: user.id, email: user.email, name: user.name } });
+    const refresh_token = await issueRefreshToken(user);
+    res.json({ ok: true, token, refresh_token, user: { id: user.id, email: user.email, name: user.name } });
   } catch (err) {
     res.status(500).json({ error: String(err.message || err) });
   }
-});
+}
+);
 
 // GET /api/me — current profile + connected accounts (auth required)
 app.get('/api/me', requireAuth, async (req, res) => {
