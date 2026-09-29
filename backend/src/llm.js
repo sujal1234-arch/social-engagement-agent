@@ -96,7 +96,8 @@ export async function generateRecommendation({ channel = 'linkedin', topic = '',
       content:
         'You are a concise B2B social media assistant. Reply with ONLY valid JSON, no prose, no markdown: ' +
         '{"hook":"one-line hook (memory-informed)","hook_b":"one-line generic/technical variant for A/B control","caption":"two-sentence caption",'+
-        '"hashtags":["three hashtags starting with #"],"best_time":"Weekday + hour, e.g. Tuesday 10:00","why":"one short sentence citing the matched post CTR"}',
+        '"hashtags":["three hashtags starting with #"],"best_time":"Weekday + hour, e.g. Tuesday 10:00","why":"one short sentence citing the matched post CTR"} ' +
+        'Match the tone and style of the requested channel (e.g. LinkedIn professional, X short and punchy, Instagram visual and benefit-led).',
     },
     {
       role: 'user',
@@ -135,8 +136,11 @@ function firstClause(text) {
 
 export function templateRecommendation({ channel = 'linkedin', examples = [] }) {
   const top = examples[0];
-  const hashtags =
-    channel === 'x' ? ['#buildinpublic', '#APIs', '#SaaS'] : ['#B2BMarketing', '#CaseStudy', '#DevTools'];
+  const hashtagSets = {
+    x: ['#buildinpublic', '#APIs', '#SaaS'],
+    instagram: ['#BuildInPublic', '#DevTools', '#TechTips'],
+  };
+  const hashtags = hashtagSets[channel] || ['#B2BMarketing', '#CaseStudy', '#DevTools'];
   if (!top) {
     return {
       hook: 'We cut integration time by 60% — here is the exact playbook',

@@ -32,6 +32,7 @@ export default function App() {
     best_time: '',
     schedule_time: '',
   });
+  const [channel, setChannel] = useState('linkedin');
   const [approved, setApproved] = useState(false);
   const [scheduledA, setScheduledA] = useState(false);
   const [scheduledB, setScheduledB] = useState(false);
@@ -78,7 +79,7 @@ export default function App() {
   async function recommend() {
     setLoadingRec(true);
     try {
-      const r = await fetch('/api/recommend?channel=linkedin');
+      const r = await fetch(`/api/recommend?channel=${encodeURIComponent(channel)}`);
       const data = await r.json();
       if (data.error) throw new Error(data.error);
       setRec(data);
@@ -113,7 +114,7 @@ export default function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          channel: 'linkedin',
+          channel,
           hook: form.hook,
           hook_b: form.hook_b,
           caption: form.caption,
@@ -231,6 +232,14 @@ export default function App() {
         {/* LEFT: composer */}
         <section className="card">
           <h2>1 · Composer</h2>
+          <label className="field">
+            Channel
+            <select value={channel} onChange={(e) => setChannel(e.target.value)}>
+              <option value="linkedin">LinkedIn</option>
+              <option value="x">X / Twitter</option>
+              <option value="instagram">Instagram</option>
+            </select>
+          </label>
           <button className={btn.primary} onClick={recommend} disabled={loadingRec}>
             {loadingRec ? 'Recalling memory…' : '✨ Recommend (memory-informed)'}
           </button>
