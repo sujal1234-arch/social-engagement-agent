@@ -53,6 +53,7 @@ import { googleConfigured, googleAuthorizeUrl, googleExchangeCode, googleUserInf
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
+app.set('trust proxy', true); // behind Render's proxy: req.protocol must be https for OAuth redirect URIs
 app.use(cors());
 app.use(express.json());
 
