@@ -97,7 +97,7 @@ export async function generateRecommendation({ channel = 'linkedin', topic = '',
         'You are a concise B2B social media assistant. Reply with ONLY valid JSON, no prose, no markdown: ' +
         '{"hook":"one-line hook (memory-informed)","hook_b":"one-line generic/technical variant for A/B control","caption":"two-sentence caption",'+
         '"hashtags":["three hashtags starting with #"],"best_time":"Weekday + hour, e.g. Tuesday 10:00","why":"one short sentence citing the matched post CTR"} ' +
-        'Match the tone and style of the requested channel (e.g. LinkedIn professional, X short and punchy, Instagram visual and benefit-led).',
+        'Match the tone and style of the requested channel (LinkedIn professional, X short and punchy, Instagram visual and benefit-led, Facebook community-focused, YouTube video-first with a hook for watching, Pinterest idea/pin style, Reddit authentic and non-salesy, Telegram concise announcement, WhatsApp short and personal).',
     },
     {
       role: 'user',
@@ -139,6 +139,12 @@ export function templateRecommendation({ channel = 'linkedin', examples = [] }) 
   const hashtagSets = {
     x: ['#buildinpublic', '#APIs', '#SaaS'],
     instagram: ['#BuildInPublic', '#DevTools', '#TechTips'],
+    facebook: ['#DevTools', '#BuildInPublic', '#Developers'],
+    youtube: ['#DevTools', '#TechReview', '#HowTo'],
+    pinterest: ['#TechTips', '#Productivity', '#DevTools'],
+    reddit: ['#DevTools', '#APIs', '#BuildInPublic'],
+    telegram: ['#DevTools', '#TechNews', '#Launch'],
+    whatsapp: ['#DevTools', '#TechTips', '#Launch'],
   };
   const hashtags = hashtagSets[channel] || ['#B2BMarketing', '#CaseStudy', '#DevTools'];
   if (!top) {

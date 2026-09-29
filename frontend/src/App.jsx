@@ -238,6 +238,12 @@ export default function App() {
               <option value="linkedin">LinkedIn</option>
               <option value="x">X / Twitter</option>
               <option value="instagram">Instagram</option>
+              <option value="facebook">Facebook</option>
+              <option value="youtube">YouTube</option>
+              <option value="pinterest">Pinterest</option>
+              <option value="reddit">Reddit</option>
+              <option value="telegram">Telegram</option>
+              <option value="whatsapp">WhatsApp</option>
             </select>
           </label>
           <button className={btn.primary} onClick={recommend} disabled={loadingRec}>
