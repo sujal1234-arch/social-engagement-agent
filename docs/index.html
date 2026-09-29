@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Social Engagement Agent - memory-powered social copilot (Hindsight + Groq)</title>
+  <meta name="description" content="An AI social-media engagement agent with a human approval loop. It recalls your historically top-CTR posts from Hindsight (Vectorize) memory, drafts hooks and captions, A/B tests variants, and writes the winner back to memory." />
+  <meta property="og:title" content="Social Engagement Agent" />
+  <meta property="og:description" content="Recommend with provenance, approve as a human, A/B test, and let the agent remember what wins. Hindsight (Vectorize) memory + Groq LLM." />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <nav>
+    <span class="brand">SE&nbsp;Agent</span>
+    <a href="#try">Try it</a>
+    <a href="#how">How it works</a>
+    <a href="#memory">Memory</a>
+    <a href="#video">Demo video</a>
+    <a href="#deploy">Deploy your own</a>
+    <a href="https://github.com/sujal1234-arch/social-engagement-agent" class="right">GitHub</a>
+  </nav>
+
+  <header class="hero">
+    <h1>Social media engagement agent<br /><span class="accent">with a human approval loop</span></h1>
+    <p class="sub">
+      It remembers which of your posts actually performed - using <strong>Hindsight (Vectorize)</strong> as its memory layer -
+      recommends hooks and captions with provenance, waits for <strong>your approval</strong>, A/B tests two variants,
+      and writes the winning hook <strong>back into memory</strong> so the next recommendation is smarter.
+    </p>
+    <div class="cta">
+      <a class="btn primary" href="https://social-engagement-agent.onrender.com" target="_blank" rel="noopener">Open the full app</a>
+      <a class="btn" href="#video">Watch the 2:45 demo</a>
+      <a class="btn ghost" href="https://github.com/sujal1234-arch/social-engagement-agent" target="_blank" rel="noopener">Source on GitHub</a>
+    </div>
+    <div class="stack">
+      <span class="pill">Hindsight (Vectorize) memory</span>
+      <span class="pill">Groq - gpt-oss-120b</span>
+      <span class="pill">React</span>
+      <span class="pill">Express</span>
+      <span class="pill">Render</span>
+    </div>
+  </header>
+
+  <main>
+    <section id="try">
+      <h2>Try it right here</h2>
+      <p class="muted">
+        This widget talks to the live deployment. The free tier sleeps after ~15 minutes idle,
+        so the first call can take up to ~40s to wake the server - worth the wait.
+      </p>
+      <div class="healthbar">
+        <span id="health" class="muted">Checking API status...</span>
+      </div>
+
+      <div class="grid3">
+        <article class="card">
+          <h3>1 - Recommend (memory-informed)</h3>
+          <label>Channel
+            <select id="channel">
+              <option value="linkedin">LinkedIn</option>
+              <option value="x">X / Twitter</option>
+            </select>
+          </label>
+          <label>Topic
+            <input id="topic" type="text" value="sync" placeholder="e.g. sync, security, onboarding" />
+          </label>
+          <button id="btnRec" class="btn primary">Generate recommendation</button>
+          <div id="recOut" class="out"></div>
+        </article>
+
+        <article class="card">
+          <h3>2 - A/B test the hooks</h3>
+          <p class="muted small">Uses the two hooks from the recommendation above (or the sample pair if you have not run it).</p>
+          <button id="btnAb" class="btn primary">Run A/B simulation</button>
+          <div id="abOut" class="out"></div>
+        </article>
+
+        <article class="card">
+          <h3>3 - Reply to a comment</h3>
+          <label>Comment
+            <textarea id="comment" rows="3">The sync keeps failing with 500 errors since the last update. Unacceptable.</textarea>
+          </label>
+          <button id="btnReply" class="btn primary">Suggest reply</button>
+          <div id="replyOut" class="out"></div>
+        </article>
+      </div>
+    </section>
+
+    <section id="how">
+      <h2>How it works</h2>
+      <div class="grid4">
+        <div class="step"><span class="num">1</span><h4>Recall</h4><p>Queries Hindsight for the account's historically highest-CTR posts. Every recommendation cites the posts it learned from.</p></div>
+        <div class="step"><span class="num">2</span><h4>Draft + approve</h4><p>Groq drafts hook, caption, hashtags and best posting time. <strong>Nothing is scheduled until a human checks the approval box.</strong></p></div>
+        <div class="step"><span class="num">3</span><h4>A/B test</h4><p>Variant A (memory-informed) vs variant B (control) are scheduled; the simulator measures CTR and picks a winner.</p></div>
+        <div class="step"><span class="num">4</span><h4>Write back</h4><p>The winning hook is retained in Hindsight as a <code>top_hook</code> memory - durable learning that survives redeploys and compounds over time.</p></div>
+      </div>
+    </section>
+
+    <section id="memory">
+      <h2>Why the memory layer matters</h2>
+      <p>
+        Most LLM social tools start from zero every session. This agent treats memory as first-class:
+        <strong>Hindsight (Vectorize)</strong> stores every post's metrics as facts (50 posts + 50 comments seeded),
+        recall is semantic - "highest CTR posts about integrations" - and the A/B winner is written back as a
+        first-class memory. Open the app and the <em>Memory</em> panel shows exactly what the agent knows,
+        including the winning hooks and their CTRs. That transparency is the point: recommendations are
+        grounded, auditable, and improve with every test.
+      </p>
+    </section>
+
+    <section id="video">
+      <h2>2:45 demo</h2>
+      <video controls preload="metadata" src="demo/demo-video.mp4"></video>
+      <p class="muted small">Recommend -> approve -> A/B -> winner -> memory writeback -> comment reply, against real Hindsight Cloud.</p>
+    </section>
+
+    <section id="deploy">
+      <h2>Deploy your own</h2>
+      <p>One click deploys the full app (API + UI) to your Render account; you paste in your own keys.</p>
+      <p>
+        <a href="https://render.com/deploy?repo=https://github.com/sujal1234-arch/social-engagement-agent">
+          <img src="https://render.com/images/deploy-to-render-button.svg" alt="Deploy to Render" height="42" />
+        </a>
+      </p>
+      <p class="muted">You will be asked for three env vars at deploy time (get free keys at
+        <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com</a> and
+        <a href="https://vectorize.io" target="_blank" rel="noopener">vectorize.io</a> for Hindsight):</p>
+      <table>
+        <tr><th>Variable</th><th>Value</th></tr>
+        <tr><td><code>HINDSIGHT_BASE_URL</code></td><td><code>https://api.hindsight.vectorize.io</code></td></tr>
+        <tr><td><code>HINDSIGHT_API_KEY</code></td><td>your Hindsight API key</td></tr>
+        <tr><td><code>GROQ_API_KEY</code></td><td>your Groq API key</td></tr>
+      </table>
+      <p class="muted small">Prefer self-hosting? The repo runs anywhere Node 20+ runs:
+        <code>npm run install:all && npm run build && npm start</code>.</p>
+
+      <h3>This landing site is GitHub Pages</h3>
+      <p class="muted">It is the <code>docs/</code> folder of the same repo - any push to <code>main</code> republishes it.
+        To copy it: <em>Settings -> Pages -> Deploy from a branch -> main /docs</em>.</p>
+    </section>
+  </main>
+
+  <footer>
+    <span>Built for the Microsoft Developer hackathon - memory layer by <a href="https://vectorize.io" target="_blank" rel="noopener">Hindsight (Vectorize)</a>, inference by <a href="https://groq.com" target="_blank" rel="noopener">Groq</a>.</span>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

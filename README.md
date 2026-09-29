@@ -1,8 +1,13 @@
 # Social Media Engagement Agent (Hindsight memory)
 
+[![Live landing page](https://img.shields.io/badge/landing%20page-GitHub%20Pages-6ea8fe)](https://sujal1234-arch.github.io/social-engagement-agent/)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/sujal1234-arch/social-engagement-agent)
+
 An AI-powered social media engagement agent built for the Hindsight hackathon. It uses **Hindsight** (Vectorize) as its persistent memory layer to learn which posts, hooks, and reply styles work for your audience — then recommends hooks, captions, hashtags, and posting times, runs A/B tests, suggests comment replies, and **writes winning tactics back into memory** so recommendations improve over time.
 
 Demo story: generic post (low CTR) → agent recalls past winners from Hindsight → memory-informed hook + control hook scheduled as an A/B test → memory-informed variant wins ~3× CTR → winning hook is saved back to Hindsight as a `top_hook` memory.
+
+**Try it now:** landing page with a live widget → https://sujal1234-arch.github.io/social-engagement-agent/ · full app → https://social-engagement-agent.onrender.com (free tier: ~40s wake on first visit).
 
 ## Quick start
 
