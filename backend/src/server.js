@@ -289,7 +289,10 @@ app.get('/api/comments', (_req, res) => {
 app.get('/api/memory', async (_req, res) => {
   try {
     const items = await listMemories({ limit: 100 });
-    const hooks = items.filter((m) => m.tags.includes('top_hook'));
+    // Keep only primary top_hook memories (metadata.hook set). Hindsight also
+    // derives 'observation' facts from them with empty metadata — good memory,
+    // but noisy as UI rows.
+    const hooks = items.filter((m) => m.tags.includes('top_hook') && m.metadata?.hook);
     const posts = items.filter((m) => m.tags.includes('post'));
     const comments = items.filter((m) => m.tags.includes('comment'));
     res.json({
