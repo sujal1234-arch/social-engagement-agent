@@ -3,7 +3,7 @@
 [![Live landing page](https://img.shields.io/badge/landing%20page-GitHub%20Pages-6ea8fe)](https://sujal1234-arch.github.io/social-engagement-agent/)
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/sujal1234-arch/social-engagement-agent)
 
-An AI-powered social media engagement agent built for the Hindsight hackathon. It uses **Hindsight** (Vectorize) as its persistent memory layer to learn which posts, hooks, and reply styles work for your audience — then recommends hooks, captions, hashtags, and posting times, runs A/B tests, suggests comment replies, and **writes winning tactics back into memory** so recommendations improve over time.
+An AI-powered social media engagement agent. It uses **Hindsight** (Vectorize) as its persistent memory layer to learn which posts, hooks, and reply styles work for your audience — then recommends hooks, captions, hashtags, and posting times, runs A/B tests, suggests comment replies, and **writes winning tactics back into memory** so recommendations improve over time.
 
 Demo story: generic post (low CTR) → agent recalls past winners from Hindsight → memory-informed hook + control hook scheduled as an A/B test → memory-informed variant wins ~3× CTR → winning hook is saved back to Hindsight as a `top_hook` memory.
 
@@ -109,7 +109,7 @@ A/B metrics are a deterministic simulation (memory-informed variant lands at ~5�
 
 ## Notes for judges
 
-- Hindsight is the memory layer (retain/recall of post performance, comment issues, and winning hooks) — required by the hackathon brief, used end-to-end.
+- Hindsight is the memory layer (retain/recall of post performance, comment issues, and winning hooks), used end-to-end.
 - Human-in-the-loop: nothing is scheduled without the approval checkbox.
 - Provenance: every recommendation shows which memory entries (post ids + CTR) produced it.
 - Swap the mock scheduler for LinkedIn/Twitter APIs later; the A/B + memory loop is integration-agnostic.

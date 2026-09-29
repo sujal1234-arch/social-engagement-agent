@@ -1,7 +1,7 @@
 import { HindsightClient } from '@vectorize-io/hindsight-client';
 
 /**
- * Hindsight adapter — the hackathon-required memory layer.
+ * Hindsight adapter — the memory layer.
  *
  * Preferred: official @vectorize-io/hindsight-client SDK, speaking to either
  *   - Hindsight Cloud  (HINDSIGHT_BASE_URL=https://api.hindsight.vectorize.io + HINDSIGHT_API_KEY)
