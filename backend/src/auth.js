@@ -13,6 +13,13 @@ export function authSecret() {
   return process.env.AUTH_SECRET || process.env.HINDSIGHT_API_KEY || 'dev-only-insecure-secret-change-me';
 }
 
+/** Which secret is signing sessions — surfaced by /api/health (never the value). */
+export function authSecretSource() {
+  if (process.env.AUTH_SECRET) return 'explicit';
+  if (process.env.HINDSIGHT_API_KEY) return 'derived-from-hindsight-key';
+  return 'dev-fallback';
+}
+
 /* ---------------- password hashing ---------------- */
 
 export function hashPassword(password) {

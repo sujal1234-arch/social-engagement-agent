@@ -26,6 +26,7 @@ import {
   rateLimit,
   newOpaqueToken,
   hashToken,
+  authSecretSource,
 } from './auth.js';
 import {
   initDb,
@@ -141,6 +142,7 @@ app.get('/api/health', async (_req, res) => {
     llm: llmProviderName(),
     db: dbEngine(),
     auth: 'jwt',
+    auth_secret: authSecretSource(),
   });
 });
 await initDb();
