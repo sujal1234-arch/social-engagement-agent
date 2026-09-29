@@ -627,5 +627,11 @@ if (fs.existsSync(distDir)) {
 app.listen(PORT, () => {
   console.log(`Engagement agent backend on http://localhost:${PORT}`);
   console.log(`Memory: bank=${bankId()} (set HINDSIGHT_BASE_URL to use Hindsight; file fallback otherwise)`);
-  console.log(`LLM: ${llmProviderName()} | DB: ${dbEngine()} | Auth: JWT`);
+  console.log(`LLM: ${llmProviderName()} | DB: ${dbEngine()} | Auth: JWT (secret: ${authSecretSource()})`);
+  if (authSecretSource() !== 'explicit') {
+    console.warn(
+      '[auth] WARNING: AUTH_SECRET is not set — sessions are signed with a fallback secret. ' +
+      'Set AUTH_SECRET in the host\'s environment settings before real use.'
+    );
+  }
 });
