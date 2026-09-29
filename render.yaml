@@ -1,5 +1,14 @@
-# Render deployment — one web service serves the API + built React app.
-# In the Render dashboard, set the environment variables listed below.
+# Render deployment — one web service serves the API + built React app,
+# backed by a managed Postgres instance so accounts and connections survive
+# redeploys (Render's free web tier has an ephemeral disk).
+#
+# After the first sync, enter the secret values in the dashboard when prompted.
+
+databases:
+  - name: social-engagement-agent-db
+    plan: free
+    databaseName: engagement_agent
+    user: agent
 
 services:
   - type: web
@@ -15,6 +24,15 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      # Persistent store for users + connected accounts (falls back to SQLite
+      # if this is ever unreachable, so the demo never breaks).
+      - key: DATABASE_URL
+        fromDatabase:
+          name: social-engagement-agent-db
+          property: connectionString
+      # Signs session JWTs and encrypts stored platform tokens.
+      - key: AUTH_SECRET
+        sync: false
       - key: HINDSIGHT_BASE_URL
         sync: false
       - key: HINDSIGHT_API_KEY

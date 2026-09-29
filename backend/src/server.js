@@ -23,10 +23,28 @@ import {
   authOptional,
   encryptToken,
   decryptToken,
+  rateLimit,
+  newOpaqueToken,
+  hashToken,
 } from './auth.js';
-import { initDb, dbEngine, findUserByEmail, createUser, getUser, listConnections, getConnection, upsertConnection, deleteConnection } from './db.js';
+import {
+  initDb,
+  dbEngine,
+  findUserByEmail,
+  createUser,
+  getUser,
+  listConnections,
+  getConnection,
+  upsertConnection,
+  deleteConnection,
+  saveToken,
+  consumeToken,
+  revokeTokensForUser,
+  setUserPassword,
+} from './db.js';
 import { PLATFORMS, platformList, platformConfigured, authorizeUrl, exchangeCode, demoIdentity } from './connections.js';
 import { retainUserPosts, retainWinnerForUser, userTags } from './user-memory.js';
+import { fetchPlatformMetrics, metricLabelFor } from './metrics.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -129,8 +147,11 @@ await initDb();
 
 /* =================== AUTH =================== */
 
-// POST /api/register { email, password, name } -> { token, user }
-app.post('/api/register', async (req, res) => {
+// POST /api/register { email, password, name } -> { token, refresh_token, user }
+app.post(
+  '/api/register',
+  rateLimit({ windowMs: 60 * 60_000, max: 20, keyFn: (req) => `register:${req.ip}` }),
+  async (req, res) => {
   try {
     const email = String(req.body?.email || '').trim().toLowerCase();
     const password = String(req.body?.password || '');
@@ -140,14 +161,90 @@ app.post('/api/register', async (req, res) => {
     if (await findUserByEmail(email)) return res.status(409).json({ error: 'An account with this email already exists' });
     const user = await createUser({ email, name, passwordHash: hashPassword(password) });
     const token = signJwt({ sub: user.id, email: user.email, name: user.name });
-    res.json({ ok: true, token, user: { id: user.id, email: user.email, name: user.name } });
+    const refresh_token = await issueRefreshToken(user);
+    res.json({ ok: true, token, refresh_token, user: { id: user.id, email: user.email, name: user.name } });
   } catch (err) {
     res.status(500).json({ error: String(err.message || err) });
   }
+}
+);
+
+/** Issue a 30-day refresh token; only its hash is stored. */
+async function issueRefreshToken(user) {
+  const { raw, hash } = newOpaqueToken();
+  await saveToken({
+    tokenHash: hash,
+    userId: user.id,
+    kind: 'refresh',
+    expiresAt: new Date(Date.now() + 30 * 86400000).toISOString(),
+  });
+  return raw;
+}
+
+// POST /api/refresh { refresh_token } -> new access token (rotates the refresh token)
+app.post(
+  '/api/refresh',
+  rateLimit({ windowMs: 15 * 60_000, max: 60, keyFn: (req) => `refresh:${req.ip}` }),
+  async (req, res) => {
+    const raw = String(req.body?.refresh_token || '');
+    if (!raw) return res.status(400).json({ error: 'refresh_token required' });
+    const userId = await consumeToken({ tokenHash: hashToken(raw), kind: 'refresh' });
+    if (!userId) return res.status(401).json({ error: 'Invalid or expired refresh token' });
+    const user = await getUser(userId);
+    if (!user) return res.status(401).json({ error: 'User not found' });
+    const token = signJwt({ sub: user.id, email: user.email, name: user.name });
+    const refresh_token = await issueRefreshToken(user);
+    res.json({ ok: true, token, refresh_token, user: { id: user.id, email: user.email, name: user.name } });
+  }
+);
+
+// POST /api/logout — revoke every refresh token for the caller
+app.post('/api/logout', requireAuth, async (req, res) => {
+  await revokeTokensForUser(req.user.id, 'refresh');
+  res.json({ ok: true });
 });
 
-// POST /api/login { email, password } -> { token, user }
-app.post('/api/login', async (req, res) => {
+// POST /api/password/reset-request { email }
+// Answers identically whether or not the account exists (no enumeration).
+// The token is returned only with AUTH_DEV_MODE=1 — wire SMTP to email it.
+app.post(
+  '/api/password/reset-request',
+  rateLimit({ windowMs: 15 * 60_000, max: 5, keyFn: (req) => `reset:${req.ip}:${String(req.body?.email || '').toLowerCase()}` }),
+  async (req, res) => {
+    const email = String(req.body?.email || '').toLowerCase();
+    const user = await findUserByEmail(email);
+    const generic = { ok: true, message: 'If that account exists, a reset link has been sent.' };
+    if (!user) return res.json(generic);
+    const { raw, hash } = newOpaqueToken();
+    await saveToken({
+      tokenHash: hash,
+      userId: user.id,
+      kind: 'reset',
+      expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+    });
+    if (process.env.AUTH_DEV_MODE === '1') return res.json({ ...generic, dev_reset_token: raw });
+    // TODO: deliver via SMTP when SMTP_HOST/SMTP_USER/SMTP_PASS are configured.
+    res.json(generic);
+  }
+);
+
+// POST /api/password/reset { token, password }
+app.post('/api/password/reset', async (req, res) => {
+  const raw = String(req.body?.token || '');
+  const password = String(req.body?.password || '');
+  if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  const userId = await consumeToken({ tokenHash: hashToken(raw), kind: 'reset' });
+  if (!userId) return res.status(400).json({ error: 'Invalid or expired reset token' });
+  await setUserPassword(userId, hashPassword(password));
+  await revokeTokensForUser(userId, 'refresh');
+  res.json({ ok: true, message: 'Password updated — sign in again.' });
+});
+
+// POST /api/login { email, password } -> { token, refresh_token, user }
+app.post(
+  '/api/login',
+  rateLimit({ windowMs: 15 * 60_000, max: 10, keyFn: (req) => `login:${req.ip}:${String(req.body?.email || '').toLowerCase()}` }),
+  async (req, res) => {
   try {
     const email = String(req.body?.email || '').trim().toLowerCase();
     const password = String(req.body?.password || '');
@@ -380,13 +477,25 @@ app.post('/api/schedule', (req, res) => {
   res.json({ ok: true, ab_id, post, both_scheduled: complete, status: updated.status });
 });
 
-// GET /api/ab-results/:id — simulate metrics, pick winner, write winner back to Hindsight
-// Winner memory is tagged with the owning user + platform when the test has a user.
-app.get('/api/ab-results/:id', async (req, res) => {
+// GET /api/ab-results/:id — real platform metrics when the account is connected,
+// otherwise the deterministic simulator. The response always reports the source.
+app.get('/api/ab-results/:id', authOptional, async (req, res) => {
   try {
     const test = getAb(req.params.id);
     if (!test) return res.status(404).json({ error: `unknown ab_id ${req.params.id}` });
-    const results = simulateResults(test);
+    let results = null;
+    let metricsSource = 'simulated';
+    if (test.user_id || req.user?.id) {
+      const real = await fetchPlatformMetrics({ userId: test.user_id || req.user.id, platform: test.channel, test });
+      if (real) {
+        results = { A: real.A, B: real.B, winner: real.winner, uplift: real.uplift, metric: real.metric };
+        metricsSource = real.source;
+        test.results = results;
+        test.status = 'complete';
+        saveAb(test);
+      }
+    }
+    if (!results) results = simulateResults(test);
     let writeback = test.writeback;
     if (results.winner === 'A' && !writeback) {
       const w = results.A;
@@ -412,6 +521,12 @@ app.get('/api/ab-results/:id', async (req, res) => {
       channel: test.channel,
       variants: { A: test.variants.A, B: test.variants.B },
       results,
+      metrics_source: metricsSource,
+      metrics_note:
+        metricsSource === 'platform-api'
+          ? `Read from the connected ${test.channel} insights API`
+          : `Simulated 48h (connect ${test.channel} with provider credentials to read real insights)`,
+      metric: metricLabelFor(test.channel),
       memory_writeback: test.writeback,
       memory_mode: hindsightMode(),
     });

@@ -30,6 +30,7 @@ export default function App() {
   const [authBusy, setAuthBusy] = useState(false);
   const [connections, setConnections] = useState([]);
   const [platforms, setPlatforms] = useState([]);
+  const [memTab, setMemTab] = useState('all');
   const [form, setForm] = useState({
     hook: '',
     hook_b: '',
@@ -61,7 +62,7 @@ export default function App() {
 
   const loadMemory = useCallback(async () => {
     try {
-      const r = await fetch('/api/memory', { headers: authHeaders() });
+      const r = await apiFetch('/api/memory');
       setMemory(await r.json());
     } catch {
       /* ignore */
@@ -90,6 +91,32 @@ export default function App() {
     const t = localStorage.getItem('sea_token');
     return t ? { Authorization: `Bearer ${t}` } : {};
   }, []);
+
+  /** Fetch with auth + one silent refresh attempt when the access token expired. */
+  const apiFetch = useCallback(async (path, opts = {}) => {
+    const doFetch = () => fetch(path, { ...opts, headers: { ...(opts.headers || {}), ...authHeaders() } });
+    let res = await doFetch();
+    if (res.status === 401) {
+      const rt = localStorage.getItem('sea_refresh');
+      if (rt) {
+        try {
+          const r = await fetch('/api/refresh', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refresh_token: rt }),
+          });
+          if (r.ok) {
+            const data = await r.json();
+            localStorage.setItem('sea_token', data.token);
+            localStorage.setItem('sea_refresh', data.refresh_token);
+            setUser(data.user);
+            res = await doFetch();
+          }
+        } catch { /* fall through to the 401 */ }
+      }
+    }
+    return res;
+  }, [authHeaders]);
 
   async function restoreSession() {
     const t = localStorage.getItem('sea_token');
@@ -128,6 +155,7 @@ export default function App() {
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || 'Failed');
       localStorage.setItem('sea_token', data.token);
+      if (data.refresh_token) localStorage.setItem('sea_refresh', data.refresh_token);
       setUser(data.user);
       const me = await fetch('/api/me', { headers: { Authorization: `Bearer ${data.token}` } }).then((x) => x.json());
       setConnections(me.connections || []);
@@ -141,8 +169,10 @@ export default function App() {
     }
   }
 
-  function logout() {
+  async function logout() {
+    try { await fetch('/api/logout', { method: 'POST', headers: authHeaders() }); } catch { /* offline ok */ }
     localStorage.removeItem('sea_token');
+    localStorage.removeItem('sea_refresh');
     setUser(null);
     setConnections([]);
     showToast('Signed out');
@@ -188,7 +218,7 @@ export default function App() {
   async function recommend() {
     setLoadingRec(true);
     try {
-      const r = await fetch(`/api/recommend?channel=${encodeURIComponent(channel)}`, { headers: authHeaders() });
+      const r = await apiFetch(`/api/recommend?channel=${encodeURIComponent(channel)}`);
       const data = await r.json();
       if (data.error) throw new Error(data.error);
       setRec(data);
@@ -219,9 +249,9 @@ export default function App() {
       return;
     }
     try {
-      const r = await fetch('/api/create-ab', {
+      const r = await apiFetch('/api/create-ab', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           channel,
           hook: form.hook,
@@ -300,9 +330,9 @@ export default function App() {
     setModalTag(c.tag || '');
     setModalLoading(true);
     try {
-      const r = await fetch('/api/reply-suggest', {
+      const r = await apiFetch('/api/reply-suggest', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ comment: c.text }),
       });
       const data = await r.json();
@@ -388,6 +418,9 @@ export default function App() {
               return (
                 <div key={p.id} className="connection-row">
                   <span className="conn-label">{p.label}</span>
+                  <Pill tone={p.oauthConfigured ? 'good' : 'neutral'}>
+                    {p.oauthConfigured ? 'live OAuth' : 'demo consent'}
+                  </Pill>
                   {conn ? (
                     <>
                       <Pill tone="good">✅ Connected{conn.username ? ` — ${conn.username}` : ''}</Pill>
@@ -515,7 +548,7 @@ export default function App() {
           {abId && <code className="ab-id">ab_id: {abId}</code>}
 
           <button className={btn.primary} onClick={fetchResults} disabled={loadingResults || !abId}>
-            {loadingResults ? 'Simulating 48h…' : '📊 Fetch A/B results (simulated)'}
+            {loadingResults ? 'Measuring engagement…' : '📊 Fetch A/B results'}
           </button>
 
           {abResults && (
@@ -526,13 +559,16 @@ export default function App() {
                   {abResults.results.uplift}× CTR uplift
                 </span>
               </h3>
+              <p className="muted small">
+                metric: {abResults.metric || 'CTR'} · source: {abResults.metrics_source || 'simulated'} — {abResults.metrics_note}
+              </p>
               <table>
                 <thead>
                   <tr>
                     <th />
                     <th>Impressions</th>
                     <th>Clicks</th>
-                    <th>CTR</th>
+                    <th>{abResults.metric || 'CTR'}</th>
                     <th>Likes</th>
                     <th>Comments</th>
                   </tr>
@@ -580,12 +616,32 @@ export default function App() {
             <Pill tone="good">{memory?.top_hooks?.length || 0} winning hooks</Pill>
           </div>
 
+          {(() => {
+            const posts = memory?.posts || [];
+            const plats = ['all', ...Array.from(new Set(posts.map((p) => p.metadata?.platform).filter(Boolean)))];
+            const hooks = (memory?.top_hooks || []).filter((h) => memTab === 'all' || h.metadata?.platform === memTab);
+            return (
+              <>
+                {plats.length > 1 && (
+                  <div className="mem-tabs">
+                    {plats.map((p) => (
+                      <button
+                        key={p}
+                        className={`mem-tab${memTab === p ? ' active' : ''}`}
+                        onClick={() => setMemTab(p)}
+                      >
+                        {p === 'all' ? 'All platforms' : p === 'linkedin' ? 'My LinkedIn posts' : p === 'instagram' ? 'My Instagram Reels' : p === 'tiktok' ? 'My TikTok clips' : p === 'youtube' ? 'My YouTube videos' : `My ${p} posts`}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
           <h3>Top hooks learned (Hindsight)</h3>
           <div className="hooks">
-            {(memory?.top_hooks || []).length === 0 && (
+            {hooks.length === 0 && (
               <p className="empty">None yet — run the A/B flow and the winning hook will be saved here.</p>
             )}
-            {(memory?.top_hooks || []).map((h) => (
+            {hooks.map((h) => (
               <div key={h.id || h.text} className="hook">
                 “{h.metadata?.hook || h.text}”
                 <small>
@@ -596,6 +652,16 @@ export default function App() {
               </div>
             ))}
           </div>
+
+          {memory?.scope && (
+            <p className="muted small">
+              scope: {memory.scope === 'shared-demo' ? 'shared demo pool (sign in for your own)' : 'your private memory'}
+              {memTab !== 'all' ? ` · filtered to ${memTab}` : ''}
+            </p>
+          )}
+              </>
+            );
+          })()}
 
           <h3>Comments (click for reply suggestion)</h3>
           <div className="comments">

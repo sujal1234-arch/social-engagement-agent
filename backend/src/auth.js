@@ -113,3 +113,39 @@ export function authOptional(req, _res, next) {
   if (payload?.sub) req.user = { id: payload.sub, email: payload.email, name: payload.name };
   next();
 }
+
+/* ---------------- rate limiting (in-memory sliding window) ---------------- */
+
+const buckets = new Map();
+
+/**
+ * Simple per-key rate limiter for auth endpoints.
+ * keyFn decides the bucket (email, IP, or both).
+ */
+export function rateLimit({ windowMs = 15 * 60_000, max = 10, keyFn } = {}) {
+  return (req, res, next) => {
+    const key = (keyFn ? keyFn(req) : `${req.ip}:${req.path}`) || 'anon';
+    const now = Date.now();
+    const hits = (buckets.get(key) || []).filter((t) => now - t < windowMs);
+    if (hits.length >= max) {
+      const retry = Math.ceil((windowMs - (now - hits[0])) / 1000);
+      res.set('Retry-After', String(retry));
+      return res.status(429).json({ error: `Too many attempts. Try again in ${retry}s.` });
+    }
+    hits.push(now);
+    buckets.set(key, hits);
+    next();
+  };
+}
+
+/* ---------------- refresh + password-reset tokens ---------------- */
+
+/** Opaque random token; only its SHA-256 hash is persisted. */
+export function newOpaqueToken() {
+  const raw = crypto.randomBytes(32).toString('base64url');
+  return { raw, hash: hashToken(raw) };
+}
+
+export function hashToken(raw) {
+  return crypto.createHash('sha256').update(`tok:${raw}`).digest('hex');
+}

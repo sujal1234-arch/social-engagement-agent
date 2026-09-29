@@ -212,6 +212,18 @@ body {
 .auth-form .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .account-panel { margin-top: 16px; }
 .connections { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+.mem-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 14px; }
+.mem-tab {
+  background: var(--panel-2, #1a2133);
+  border: 1px solid var(--border, #263049);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.mem-tab:hover { color: var(--text); }
+.mem-tab.active { background: var(--accent); border-color: var(--accent); color: #0b1020; font-weight: 600; }
 .connection-row {
   display: flex;
   align-items: center;

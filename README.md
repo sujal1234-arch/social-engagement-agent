@@ -61,10 +61,30 @@ Everything is optional — the app degrades gracefully so the demo always runs:
 | `GROQ_API_KEY` or `OPENAI_API_KEY` | LLM for hooks/captions/replies | deterministic template fallback |
 | `HINDSIGHT_BANK_ID` | memory bank name | `social-engagement-agent` |
 | `AUTH_SECRET` | JWT signing + AES-256-GCM token encryption | dev fallback secret (set this in production) |
+| `DATABASE_URL` | Postgres for users + connected accounts (survives redeploys) | SQLite (`data/agent.db`), then a JSON file |
+| `AUTH_DEV_MODE=1` | returns `dev_reset_token` from the reset-request endpoint (local testing) | token is not returned (wire SMTP to email it) |
 | `<PLATFORM>_CLIENT_ID` / `_SECRET` (e.g. `LINKEDIN_`, `INSTAGRAM_`, `GOOGLE_`, `X_`, `FACEBOOK_`, `PINTEREST_`, `REDDIT_`) | real OAuth for connecting social accounts | clearly-labelled **demo consent** flow (same full connect → import → per-user memory path) |
 | `TELEGRAM_BOT_TOKEN` | Telegram/WhatsApp channel | demo consent |
 
 The header pills in the UI show which mode is active (`memory: hindsight` vs `memory: fallback`).
+
+## Persistence
+
+Accounts, connected platform tokens and one-time tokens are stored in the first store available:
+
+1. **Postgres** (`DATABASE_URL`) — used on Render via the Blueprint's managed database, so logins survive redeploys. Free instances expire after ~30 days.
+2. **SQLite** (`data/agent.db`, `node:sqlite`) — local default.
+3. **JSON file** (`data/users-fallback.json`) — last resort.
+
+`/api/health` reports which engine is active (`db: postgres|sqlite|json`). Content memory always lives in Hindsight, independent of this store.
+
+## Auth hardening
+
+- **Login/register rate limits** — 10 attempts / 15 min per IP+email; registration 20/hour per IP.
+- **Refresh tokens** — 30-day, rotated on every use; reusing a rotated token is rejected. `POST /api/refresh` renews the 7-day access JWT.
+- **Logout** — revokes all refresh tokens for the user.
+- **Password reset** — `POST /api/password/reset-request` always answers the same way (no account enumeration); the single-use token expires in 30 min. Set `AUTH_DEV_MODE=1` to receive it directly, or wire SMTP to email it.
+- Passwords use `scrypt` with per-user salts; platform tokens are AES-256-GCM encrypted at rest.
 
 ## Accounts, connections & per-user memory
 
@@ -80,7 +100,10 @@ Anonymous callers still get the shared demo pool, so the hosted demo and landing
 
 | Endpoint | Description |
 |---|---|
-| `POST /api/register` / `POST /api/login` | `{email, password, name?}` → `{token, user}` (JWT, 7d) |
+| `POST /api/register` / `POST /api/login` | `{email, password, name?}` → `{token, refresh_token, user}` (JWT 7d, refresh 30d) |
+| `POST /api/refresh` | `{refresh_token}` → rotated token pair |
+| `POST /api/logout` | revoke the caller's refresh tokens |
+| `POST /api/password/reset-request` / `POST /api/password/reset` | single-use reset token (30 min) |
 | `GET /api/me` | profile + connected accounts |
 | `GET /api/platforms` | platform registry (scopes, whether real OAuth is configured) |
 | `GET /api/connect/:platform/start` | starts OAuth (redirect) or returns a demo-consent confirm URL |
@@ -101,12 +124,22 @@ Anonymous callers still get the shared demo pool, so the hosted demo and landing
 | `GET /api/recommend?channel=linkedin&topic=` | `{hook, hook_b, caption, hashtags, best_time, why, examples}` |
 | `POST /api/create-ab` | Create A/B test → `{ab_id}` |
 | `POST /api/schedule` | Schedule a variant `{ab_id, variant, time?}` (mock scheduler) |
-| `GET /api/ab-results/:id` | Simulated metrics + winner; writes winner back to Hindsight |
+| `GET /api/ab-results/:id` | Real platform metrics when the account is connected, else the simulator; reports `metrics_source` + `metrics_note`; writes the winner back to Hindsight |
 | `POST /api/reply-suggest` | `{comment}` → `{reply, tag}` (recall-augmented) |
 | `GET /api/memory` (signed in) | only that user's retained posts / hooks |
 | `GET /api/health` | Memory mode + LLM provider + DB engine status |
 
-A/B metrics are a deterministic simulation (memory-informed variant lands at ~5–6.4% CTR vs ~1.5–2.1% control, matching the real distribution in the seed data) so the demo is stable and reproducible.
+A/B metrics: when the signed-in user has a connected platform with a real access token, `/api/ab-results` reads that platform's insights API (Instagram Graph, LinkedIn socialActions, Facebook insights, YouTube statistics). Otherwise it falls back to a deterministic simulation (memory-informed variant lands at ~5–6.4% CTR vs ~1.5–2.1% control) — and the response always states which source was used, so nothing is silently faked.
+
+### Turning on real OAuth per platform
+
+Set the platform's client id/secret (e.g. `LINKEDIN_CLIENT_ID`, `INSTAGRAM_CLIENT_ID`) and register this redirect URI in the provider's developer console:
+
+```
+https://<your-host>/api/connect/<platform>/callback
+```
+
+Scopes are requested per platform (LinkedIn `r_liteprofile r_emailaddress w_member_social`; Instagram `instagram_basic instagram_manage_insights instagram_manage_comments`; others read + publish + insights). Until credentials are configured, connect buttons run a clearly-labelled **demo consent** flow so the whole connect → import → per-user memory path still works. Note that LinkedIn's `w_member_social` and Meta's insights scopes require app review before they work in production.
 
 ## 60-second demo script
 
